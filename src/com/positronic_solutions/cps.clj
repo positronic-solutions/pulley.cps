@@ -15,13 +15,13 @@
 (defn call [f cont & args]
   (apply (with-continuation f cont) args))
 
-(call identity identity 1)
-
-(defn trampoline [f & args]
-  (loop [value (apply call f identity args)]
-    (if (satisfies? IThunk value)
-      (recur (invoke-thunk value))
-      value)))
+(defn trampoline
+  "Runs f on a trampoline, and returns the resulting value."
+  ([f & args]
+     (loop [value (apply call f identity args)]
+       (if (satisfies? IThunk value)
+         (recur (invoke-thunk value))
+         value))))
 
 (defmacro thunk [& body]
   `(reify IThunk
