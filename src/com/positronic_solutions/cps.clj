@@ -1,5 +1,30 @@
 (ns com.positronic-solutions.cps)
 
+(def ^:dynamic *trampoline-depth*
+  "Records the number of trampolines active on the current stack."
+  0)
+
+(def ^:dynamic *allow-recursive-trampolines*
+  "Are we allowed to start another trampoline if there's already one on the stack?
+
+Default: true"
+  true)
+
+(def ^:dynamic *strict-cps*
+  "If true, we are not allowed to make calls to CPS functions.
+Otherwise, we can mix functions any way we like.
+
+Default: false"
+  false)
+
+(defmacro with-strict-cps [& body]
+  `(binding [*strict-cps* true]
+     ~@body))
+
+(defmacro without-recursive-trampolines [& body]
+  `(binding [*allow-recursive-trampolines* false]
+     ~@body))
+
 (defprotocol IThunk
   (invoke-thunk [thunk]))
 
@@ -10,6 +35,9 @@
   clojure.lang.IFn
   (with-continuation [f cont]
     (fn [& args]
+      (when *strict-cps*
+        (throw (new IllegalStateException "Attempt to call non-CPS routine while *strict-cps* is set.")))
+      ;; Should cont be applied in a thunk?
       (cont (apply f args)))))
 
 (defn call [f cont & args]
@@ -18,10 +46,14 @@
 (defn trampoline
   "Runs f on a trampoline, and returns the resulting value."
   ([f & args]
-     (loop [value (apply call f identity args)]
-       (if (satisfies? IThunk value)
-         (recur (invoke-thunk value))
-         value))))
+     (if (or *allow-recursive-trampolines*
+             (= *trampoline-depth* 0))
+       (binding [*trampoline-depth* (inc *trampoline-depth*)]
+         (loop [value (apply call f identity args)]
+           (if (satisfies? IThunk value)
+             (recur (invoke-thunk value))
+             value)))
+       (throw (new IllegalStateException "Attempt to invoke recursive trampoline, but *allow-recursive-trampolines* does not allow it.")))))
 
 (defmacro thunk [& body]
   `(reify IThunk
