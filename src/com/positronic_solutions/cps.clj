@@ -190,6 +190,65 @@ Ideally, it will be CPS-transformed."
        (applyTo [this args]
          (clojure.lang.AFn/applyToHelper this args)))))
 
+(defmacro cps [& body]
+  ;; Create a cps-fn, and apply it
+  `((cps-fn* ([]
+                ~@body))))
+
+(defmacro cps-expr [cont expr]
+  #_(println "expr: " expr)
+  (cond (seq? expr) `(cps-form ~cont ~expr)
+        (coll? expr) `(cps-coll ~cont ~expr)
+        ;; Otherwise, should be a literal
+        :else `(thunk (~cont ~expr))))
+
+(defmacro cps-coll [cont coll]
+  (throw (new IllegalStateException "Collection literals are not cupported at this time.")))
+
+(defmacro cps-form [cont form]
+  #_(println "form: " form)
+  (let [expanded (macroexpand form)
+        [action & body] expanded
+        f (gensym)]
+    (if (special-symbol? action)
+      `(cps-special-form ~cont ~expanded)
+      `(cps-expr (fn [~f]
+                   (call ~f ~cont ~@body))
+                 ~action))))
+
+(defmacro cps-special-form [cont [action & body]]
+  (case action
+    fn* `(cps-fn* ~@body)
+    if `(cps-if ~cont ~@body)))
+
+(defmacro cps-fn* [& bodies]
+  (let [return (gensym)]
+    `(fn->callable (fn ~@(for [spec bodies]
+                           (if (symbol? spec)
+                             spec
+                             (let [[params & body] spec]
+                               #_(println "fn: " params body)
+                               `(~(into []
+                                        (cons return params))
+                                 (cps-do ~return ~@body)))))))))
+
+(defmacro cps-if
+  ([cont test then]
+     `(cps-if ~cont ~test ~then nil))
+  ([cont test then else]
+     (let [v (gensym)]
+       `(cps-expr (fn [~v]
+                    (if ~v
+                      (cps-expr ~cont ~then)
+                      (cps-expr ~cont ~else)))
+                  ~test))))
+
+(defmacro cps-do [cont & body]
+  #_(println "do: " body)
+  (if (= (count body) 1)
+    `(cps-expr ~cont ~(first body))
+    (throw (new IllegalStateException "cps-do only supports one expression for now"))))
+
 ;; This example illustrates minimal transformation,
 ;; with manual priming of the trampoline
 (defn factorial-cps1 [n]
@@ -273,3 +332,8 @@ Ideally, it will be CPS-transformed."
               (factorial-tco (dec n) (* n acc))
               acc))]
     (factorial-tco n 1)))
+
+#_(cps (defn factorial-recur-cps [n]
+       (if (> n 0)
+         (* n (factorial-recur (dec n)))
+         1)))
