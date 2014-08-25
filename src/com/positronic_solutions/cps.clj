@@ -213,9 +213,44 @@ Ideally, it will be CPS-transformed."
         f (gensym)]
     (if (special-symbol? action)
       `(cps-special-form ~cont ~expanded)
-      `(cps-expr (fn [~f]
-                   (call ~f ~cont ~@body))
-                 ~action))))
+      `(cps-call ~cont ~@expanded))))
+
+(defmacro cps-call
+  "Macro that transforms a function call.
+
+Parameters:
+  cont - this form's continuation form
+  f - the form of the function to be called
+  args - the forms of the function arguments"
+  ([cont f & args]
+     (let [value (gensym "value_")]
+       `(cps-expr (fn [~value]
+                    (cps-apply ~cont ~value [] ~args))
+                  ~f))))
+
+(defmacro cps-apply
+  " Helper macro used by cps-call for transforming function calls.
+
+Parameters:
+  cont - this form's continuation form
+  f - a symbol representing the function to be called
+  evaled - a vector of symbols representing values
+           for function argument expressions
+           that have been transformed so far
+  unevaled - a vector containing forms for function arguments
+             that still need to be transformed"
+  ([cont f evaled unevaled]
+     (if (empty? unevaled)
+       ;; then (we have values for all the arguments -> call function)
+       `(thunk (call ~f ~cont ~@evaled))
+       ;; else (we need a value for at least one more argument)
+       (let [value (gensym "value_")]
+         `(cps-expr (fn [~value]
+                      (cps-apply ~cont ~f
+                                 ~(conj evaled value)
+                                 ~(rest unevaled)))
+                    ;; evaluate first unevaluated argument
+                    ~(first unevaled))))))
 
 (defmacro cps-special-form [cont [action & body]]
   (case action

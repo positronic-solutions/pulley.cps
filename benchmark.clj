@@ -17,8 +17,8 @@
   (println "BENCHMARK factorial-cps3")
   (criterium/bench (cps/factorial-cps3 n))
 
-  #_(println "BENCHMARK factorial-recur-cps")
-  #_(criterium/bench (cps/factorial-recur-cps n)))
+  (println "BENCHMARK factorial-recur-cps")
+  (criterium/bench (cps/factorial-recur-cps n)))
 
 (defn benchmark-function [f arglists]
   (let [separator (apply str (repeat 40 "="))]
