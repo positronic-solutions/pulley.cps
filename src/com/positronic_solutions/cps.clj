@@ -218,9 +218,24 @@ Ideally, it will be CPS-transformed."
 
 (defmacro cps-special-form [cont [action & body]]
   (case action
+    def `(cps-def ~cont ~@body)
     do `(cps-do ~cont ~@body)
     fn* `(cps-fn* ~@body)
     if `(cps-if ~cont ~@body)))
+
+(defmacro cps-def
+  ([cont name]
+     `(~cont (def ~name)))
+  ([cont name expr]
+     (let [value (gensym "value_")]
+       `(cps-expr (fn [~value]
+                    (~cont (def ~name ~value)))
+                  ~expr)))
+  ([cont name doc expr]
+     (let [value (gensym "value_")]
+       `(cps-expr (fn [~value]
+                    (~cont (def ~name ~doc ~value)))
+                  ~expr))))
 
 (defmacro cps-fn* [& bodies]
   (let [return (gensym)]
