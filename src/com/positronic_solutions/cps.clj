@@ -192,7 +192,8 @@ Ideally, it will be CPS-transformed."
 
 (defmacro cps [& body]
   ;; Create a cps-fn, and apply it
-  `((cps-fn* ([]
+  `((cps-fn* nil
+             ([]
                 ~@body))))
 
 (defmacro cps-expr [cont expr]
@@ -220,7 +221,7 @@ Ideally, it will be CPS-transformed."
   (case action
     def `(cps-def ~cont ~@body)
     do `(cps-do ~cont ~@body)
-    fn* `(cps-fn* ~@body)
+    fn* `(cps-fn* ~cont ~@body)
     if `(cps-if ~cont ~@body)))
 
 (defmacro cps-def
@@ -237,16 +238,27 @@ Ideally, it will be CPS-transformed."
                     (~cont (def ~name ~doc ~value)))
                   ~expr))))
 
-(defmacro cps-fn* [& bodies]
-  (let [return (gensym)]
-    `(fn->callable (fn ~@(for [spec bodies]
-                           (if (symbol? spec)
-                             spec
-                             (let [[params & body] spec]
-                               #_(println "fn: " params body)
-                               `(~(into []
-                                        (cons return params))
-                                 (cps-do ~return ~@body)))))))))
+(defmacro cps-fn*
+  "Constructs a CPS-transformed function
+
+If cont is not nil, it will be called with the resulting function.
+Otherwise, the resulting form will evaluate direcly to the function."
+  ([cont & bodies]
+     (let [return (gensym)]
+       ;; f = constructed function
+       (let [f `(fn->callable (fn ~@(for [spec bodies]
+                                      (if (symbol? spec)
+                                        spec
+                                        (let [[params & body] spec]
+                                          #_(println "fn: " params body)
+                                          `(~(into []
+                                                   (cons return params))
+                                            (cps-do ~return ~@body)))))))]
+         (if cont
+           ;; then (continuation provided -> pass f to continuation)
+           `(~cont ~f)
+           ;; else (continuation not provided -> return f directory)
+           f)))))
 
 (defmacro cps-if
   ([cont test then]
