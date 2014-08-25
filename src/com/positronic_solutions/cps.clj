@@ -218,6 +218,7 @@ Ideally, it will be CPS-transformed."
 
 (defmacro cps-special-form [cont [action & body]]
   (case action
+    do `(cps-do ~cont ~@body)
     fn* `(cps-fn* ~@body)
     if `(cps-if ~cont ~@body)))
 
