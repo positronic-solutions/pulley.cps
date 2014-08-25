@@ -362,14 +362,14 @@ Otherwise, the resulting form will evaluate direcly to the function."
     (* n (factorial-recur (dec n)))
     1))
 
-#_(def-cps factorial-cps [n]
-  (letfn [(factorial-tco [n acc]
-            (if (> n 0)
-              (factorial-tco (dec n) (* n acc))
-              acc))]
-    (factorial-tco n 1)))
+#_(cps (defn factorial-cps [n]
+       (letfn [(factorial-tco [n acc]
+                 (if (> n 0)
+                   (factorial-tco (dec n) (* n acc))
+                   acc))]
+         (factorial-tco n 1))))
 
-#_(cps (defn factorial-recur-cps [n]
+(cps (defn factorial-recur-cps [n]
        (if (> n 0)
-         (* n (factorial-recur (dec n)))
+         (* n (factorial-recur-cps (dec n)))
          1)))
