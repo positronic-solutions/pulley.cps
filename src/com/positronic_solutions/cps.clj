@@ -200,8 +200,9 @@ Ideally, it will be CPS-transformed."
   #_(println "expr: " expr)
   (cond (seq? expr) `(cps-form ~cont ~expr)
         (coll? expr) `(cps-coll ~cont ~expr)
-        ;; Otherwise, should be a literal
-        :else `(thunk (~cont ~expr))))
+        ;; Otherwise, should be a literal or simple expression (symbol)
+        ;; Maybe this should be thunk'd in some (or all) cases
+        :else `(~cont ~expr)))
 
 (defmacro cps-coll [cont coll]
   (throw (new IllegalStateException "Collection literals are not cupported at this time.")))
