@@ -243,11 +243,19 @@ Ideally, it will be CPS-transformed."
                       (cps-expr ~cont ~else)))
                   ~test))))
 
-(defmacro cps-do [cont & body]
-  #_(println "do: " body)
-  (if (= (count body) 1)
-    `(cps-expr ~cont ~(first body))
-    (throw (new IllegalStateException "cps-do only supports one expression for now"))))
+(defmacro cps-do
+  ([cont]
+     `(~cont nil))
+  ([cont expr & body]
+     (let [value (gensym "value_")]
+       (if (empty? body)
+         `(cps-expr (fn [~value]
+                      (~cont ~value))
+                    ~expr)
+         `(cps-expr (fn [~value]
+                      (cps-do ~cont
+                              ~@body))
+                    ~expr)))))
 
 ;; This example illustrates minimal transformation,
 ;; with manual priming of the trampoline
