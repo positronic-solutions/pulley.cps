@@ -258,7 +258,8 @@ Parameters:
     def `(cps-def ~cont ~@body)
     do `(cps-do ~cont ~@body)
     fn* `(cps-fn* ~cont ~@body)
-    if `(cps-if ~cont ~@body)))
+    if `(cps-if ~cont ~@body)
+    let* `(cps-let* ~cont ~@body)))
 
 (defmacro cps-def
   ([cont name]
@@ -308,6 +309,18 @@ Otherwise, the resulting form will evaluate direcly to the function."
                         (cps-expr ~cont-fn ~then)
                         (cps-expr ~cont-fn ~else))))
                   ~test))))
+
+(defmacro cps-let* [cont bindings & body]
+  (if (empty? bindings)
+    ;; then (no more bindings => evaluate body)
+    `(cps-do ~cont
+             ~@body)
+    ;; else (at least one more binding => evaluate and bind first binding)
+    (let [[name expr & rest-bindings] bindings]
+      `(cps-expr (fn [~name]
+                   (cps-let* ~cont ~rest-bindings
+                             ~@body))
+                 ~expr))))
 
 (defmacro cps-do
   ([cont]
