@@ -263,7 +263,8 @@ Parameters:
     fn* `(cps-fn* ~cont ~@body)
     if `(cps-if ~cont ~@body)
     let* `(cps-let* ~cont ~@body)
-    letfn* `(cps-letfn* ~cont ~@body)))
+    letfn* `(cps-letfn* ~cont ~@body)
+    quote `(cps-quote ~cont ~@body)))
 
 (defmacro cps-def
   ([cont name]
@@ -368,6 +369,10 @@ Otherwise, the resulting form will evaluate direcly to the function."
               `(deliver ~(:promise-name binding)
                         (cps-form nil ~(:fn-form binding))))
           (cps-do ~cont ~@body)))))
+
+(defmacro cps-quote
+  ([cont & body]
+     `(~cont (quote ~@body))))
 
 (defmacro cps-do
   ([cont]
