@@ -259,7 +259,8 @@ Parameters:
     do `(cps-do ~cont ~@body)
     fn* `(cps-fn* ~cont ~@body)
     if `(cps-if ~cont ~@body)
-    let* `(cps-let* ~cont ~@body)))
+    let* `(cps-let* ~cont ~@body)
+    letfn* `(cps-letfn* ~cont ~@body)))
 
 (defmacro cps-def
   ([cont name]
@@ -283,7 +284,24 @@ Otherwise, the resulting form will evaluate direcly to the function."
   ([cont & bodies]
      (let [return (gensym)]
        ;; f = constructed function
-       (let [f `(fn->callable (fn ~@(for [spec bodies]
+       (let [f `(fn->callable (fn ~@(for [spec bodies
+                                          ;; Keeping the symbol
+                                          ;; for a function (if any)
+                                          ;; is interfering with
+                                          ;; the current implementation
+                                          ;; of letfn* (it introduces
+                                          ;; a binding for the symbol?),
+                                          ;; so just filter out symbols
+                                          ;; for now.
+                                          :when (not (symbol? spec))]
+                                      ;; This should never be true,
+                                      ;; since we filter out symbols
+                                      ;; in the :when clause,
+                                      ;; but I'm keeping it around
+                                      ;; because ideally, we want
+                                      ;; to keep meaningful function names.
+                                      ;; Maybe we should convert symbols
+                                      ;; to (gensym (name spec))?
                                       (if (symbol? spec)
                                         spec
                                         (let [[params & body] spec]
@@ -321,6 +339,32 @@ Otherwise, the resulting form will evaluate direcly to the function."
                    (cps-let* ~cont ~rest-bindings
                              ~@body))
                  ~expr))))
+
+(defmacro cps-letfn*
+  ([cont bindings & body]
+     ;; I would much prefer to expand this to a letfn* form instead,
+     ;; with appropriate CPS-routine definitions instead of fn forms.
+     ;; However, letfn* appears to choke unless the value expressions
+     ;; are fn forms.
+     (let [bindings-info (for [binding (partition-all 2 bindings)]
+                           {:name (first binding)
+                            :promise-name (gensym "promise_")
+                            :fn-form (second binding)})
+           contv (gensym "cont_")
+           args (gensym "args_")]
+       `(let [~@(->> (for [binding bindings-info]
+                       [(:promise-name binding) `(promise)
+                        (:name binding) `(-> (fn [~contv & ~args]
+                                               (apply call
+                                                      (deref ~(:promise-name binding))
+                                                      ~contv
+                                                      ~args))
+                                             (fn->callable))])
+                     (apply concat))]
+          ~@(for [binding bindings-info]
+              `(deliver ~(:promise-name binding)
+                        (cps-form nil ~(:fn-form binding))))
+          (cps-do ~cont ~@body)))))
 
 (defmacro cps-do
   ([cont]
@@ -413,7 +457,7 @@ Otherwise, the resulting form will evaluate direcly to the function."
     (* n (factorial-recur (dec n)))
     1))
 
-#_(cps (defn factorial-cps [n]
+(cps (defn factorial-cps [n]
        (letfn [(factorial-tco [n acc]
                  (if (> n 0)
                    (factorial-tco (dec n) (* n acc))

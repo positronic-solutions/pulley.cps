@@ -8,17 +8,20 @@
   (println "BENCHMARK factorial-loop")
   (criterium/bench (cps/factorial-loop n))
 
-  (println "BENCHMARK factorial-cps1")
-  (criterium/bench (cps/factorial-cps1 n))
+  #_(println "BENCHMARK factorial-cps1")
+  #_(criterium/bench (cps/factorial-cps1 n))
 
-  (println "BENCHMARK factorial-cps2")
-  (criterium/bench (cps/factorial-cps2 n))
+  #_(println "BENCHMARK factorial-cps2")
+  #_(criterium/bench (cps/factorial-cps2 n))
 
-  (println "BENCHMARK factorial-cps3")
-  (criterium/bench (cps/factorial-cps3 n))
+  #_(println "BENCHMARK factorial-cps3")
+  #_(criterium/bench (cps/factorial-cps3 n))
 
   (println "BENCHMARK factorial-recur-cps")
-  (criterium/bench (cps/factorial-recur-cps n)))
+  (criterium/bench (cps/factorial-recur-cps n))
+
+  (println "BENCHMARK factorial-cps")
+  (criterium/bench (cps/factorial-cps n)))
 
 (defn benchmark-function [f arglists]
   (let [separator (apply str (repeat 40 "="))]
@@ -31,7 +34,7 @@
       (println))))
 
 (defn run-benchmarks []
-  (binding [cps/*allow-recursive-trampolines* false]
+  (cps/without-recursive-trampolines
     (benchmark-function benchmark-factorial
                         [[10] [20] [10N] [2543N]])))
 
