@@ -300,11 +300,13 @@ Otherwise, the resulting form will evaluate direcly to the function."
   ([cont test then]
      `(cps-if ~cont ~test ~then nil))
   ([cont test then else]
-     (let [v (gensym)]
+     (let [v (gensym)
+           cont-fn (gensym "continuation_")]
        `(cps-expr (fn [~v]
-                    (if ~v
-                      (cps-expr ~cont ~then)
-                      (cps-expr ~cont ~else)))
+                    (let [~cont-fn ~cont]
+                      (if ~v
+                        (cps-expr ~cont-fn ~then)
+                        (cps-expr ~cont-fn ~else))))
                   ~test))))
 
 (defmacro cps-do
