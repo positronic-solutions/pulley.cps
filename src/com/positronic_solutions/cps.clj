@@ -1,3 +1,6 @@
+;; Copyright 2014 Positronic Solutions, LLC.
+;; All rights reserved.
+
 (ns com.positronic-solutions.cps)
 
 (def ^:dynamic *trampoline-depth*

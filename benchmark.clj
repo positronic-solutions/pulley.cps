@@ -1,3 +1,6 @@
+;; Copyright 2014 Positronic Solutions, LLC.
+;; All rights reserved.
+
 (require '[com.positronic-solutions.cps :as cps])
 (require '[criterium.core :as criterium])
 

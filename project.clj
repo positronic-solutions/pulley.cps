@@ -1,3 +1,6 @@
+;; Copyright 2014 Positronic Solutions, LLC.
+;; All rights reserved.
+
 (defproject com.positronic-solutions.cps "0.1.0-SNAPSHOT"
   :description "FIXME: write description"
   :url "http://example.com/FIXME"
