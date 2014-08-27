@@ -264,7 +264,8 @@ Parameters:
     if `(cps-if ~cont ~@body)
     let* `(cps-let* ~cont ~@body)
     letfn* `(cps-letfn* ~cont ~@body)
-    quote `(cps-quote ~cont ~@body)))
+    quote `(cps-quote ~cont ~@body)
+    var `(cps-var ~cont ~@body)))
 
 (defmacro cps-def
   ([cont name]
@@ -373,6 +374,10 @@ Otherwise, the resulting form will evaluate direcly to the function."
 (defmacro cps-quote
   ([cont & body]
      `(~cont (quote ~@body))))
+
+(defmacro cps-var
+  ([cont symbol]
+     `(~cont (var ~symbol))))
 
 (defmacro cps-do
   ([cont]
