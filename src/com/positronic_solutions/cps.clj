@@ -265,6 +265,7 @@ Parameters:
     let* `(cps-let* ~cont ~@body)
     letfn* `(cps-letfn* ~cont ~@body)
     quote `(cps-quote ~cont ~@body)
+    set! `(cps-set! ~cont ~@body)
     var `(cps-var ~cont ~@body)))
 
 (defmacro cps-def
@@ -374,6 +375,13 @@ Otherwise, the resulting form will evaluate direcly to the function."
 (defmacro cps-quote
   ([cont & body]
      `(~cont (quote ~@body))))
+
+(defmacro cps-set!
+  ([cont place expr]
+     (let [value (gensym "value_")]
+       `(cps-expr (fn [~value]
+                    (~cont (set! ~place ~value)))
+                  ~expr))))
 
 (defmacro cps-var
   ([cont symbol]
