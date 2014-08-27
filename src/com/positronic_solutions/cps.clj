@@ -199,6 +199,14 @@ Ideally, it will be CPS-transformed."
              ([]
                 ~@body))))
 
+(defmacro cps-fn
+  ;; This is a public macro for generating CPS-transformed functions
+  "Generates a CPS-transformed function from the given body(ies).
+Simply specify the function the same way you would use fn."
+  ([& body]
+     `(cps-expr nil
+                (fn ~@body))))
+
 (defmacro cps-expr [cont expr]
   #_(println "expr: " expr)
   (cond (seq? expr) `(cps-form ~cont ~expr)
