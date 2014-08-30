@@ -44,6 +44,8 @@ Default: false"
       (cont (apply f args)))))
 
 (defn call [f cont & args]
+  #_(println "call: continuation is " cont)
+  ;; thunk this (so we don't have to thunk it everywhere it's called)?
   (apply (with-continuation f cont) args))
 
 (defn trampoline
@@ -401,8 +403,7 @@ Otherwise, the resulting form will evaluate direcly to the function."
   ([cont expr & body]
      (let [value (gensym "value_")]
        (if (empty? body)
-         `(cps-expr (fn [~value]
-                      (~cont ~value))
+         `(cps-expr ~cont
                     ~expr)
          `(cps-expr (fn [~value]
                       (cps-do ~cont
