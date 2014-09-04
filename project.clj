@@ -1,7 +1,7 @@
 ;; Copyright 2014 Positronic Solutions, LLC.
 ;; All rights reserved.
 
-(defproject com.positronic-solutions.cps "0.1.0-SNAPSHOT"
+(defproject com.positronic-solutions/cps "0.1.0-SNAPSHOT"
   :description "CPS transformation macros and trampoline execution engine"
   :dependencies [[org.clojure/clojure "1.5.1"]
                  [criterium "0.4.3"]]
