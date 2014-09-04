@@ -268,21 +268,22 @@ Simply specify the function the same way you would use fn."
 
 (defmacro cps-form [cont form]
   #_(println "form: " form)
-  ;; TODO: handle forms that expand to an atomic expression
-  (let [expanded (macroexpand form)
-        [operator & operands] expanded
-        f (gensym)]
-    (if (or (special-symbol? operator)
-            (and (symbol? operator)
+  (let [[operator & operands] form]
+    ;; Check to see if we need to handle the form specially
+    (if (and (symbol? operator)
+             (or (special-symbol? operator)
                  (contains? *special-form-handlers* (resolve operator))))
       ;; then (handle as a "special form")
-      `(cps-special-form ~cont ~expanded)
-      ;; else (check to see if expansion is complete)
-      (if (identical? form expanded)
-        ;; then (handle as function call)
-        `(cps-call ~cont ~@expanded)
-        ;; else (try to expand again)
-        `(cps-form ~cont ~expanded)))))
+      `(cps-special-form ~cont ~form)
+      ;; else (attempt to expand)
+      (let [expanded (macroexpand-1 form)]
+        (if (identical? form expanded)
+          ;; then (expansion complete => handle as function call)
+          `(cps-call ~cont ~@expanded)
+          ;; else (transform expanded expression)
+          ;; Note: the expansion could be an atomic expression,
+          ;;       so we use cps-expr here.
+          `(cps-expr ~cont ~expanded))))))
 
 (defmacro cps-call
   "Macro that transforms a function call.
