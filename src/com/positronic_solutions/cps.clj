@@ -195,6 +195,52 @@ Ideally, it will be CPS-transformed."
        (applyTo [this args]
          (clojure.lang.AFn/applyToHelper this args)))))
 
+(def ^:dynamic *special-form-handlers*
+  "Contains a map specifying how special forms are handled.
+
+We need to treat certain forms as \"special\".
+Often, these are Clojure \"special forms\",
+but there are other forms we need to treat specially as well —
+such as 'binding' forms (which Clojure implements as a macro).
+
+This var provides a unified way of detecting these cases
+and dispatching to an appropriate handler function.
+It is also dynamic, allowing compilers built on top of the cps compiler
+to implement their own special forms.
+
+Clojure special forms are handled by mapping its \"special symbol\"
+to a handler function.
+Other forms are handled by mapping the var object
+representing the operator of the form (i.e., #'binding)
+to a handler function.
+The handler function must accept the following parameters (in order)
+* form - the form to be expanded
+* macro-env - the macro environment
+* continuation - a form representing the current continuation
+                 of the form being expanded
+* dynamic-env - a symbol representing the dynamic environment
+                that will be available when the form is executed
+                (i.e., a map containing the var->value bindings
+                for dynamic vars)"
+  {'def (fn [[operator & body] &env cont]
+          `(cps-def ~cont ~@body))
+   'do (fn [[operator & body] &env cont]
+         `(cps-do ~cont ~@body))
+   'fn* (fn [[operator & body] &env cont]
+          `(cps-fn* ~cont ~@body))
+   'if (fn [[operator & body] &env cont]
+         `(cps-if ~cont ~@body))
+   'let* (fn [[operator & body] &env cont]
+           `(cps-let* ~cont ~@body))
+   'letfn* (fn [[operator & body] &env cont]
+             `(cps-letfn* ~cont ~@body))
+   'quote (fn [[operator & body] &env cont]
+            `(cps-quote ~cont ~@body))
+   'set! (fn [[operator & body] &env cont]
+           `(cps-set! ~cont ~@body))
+   'var (fn [[operator & body] &env cont]
+          `(cps-var ~cont ~@body))})
+
 (defmacro cps [& body]
   ;; Create a cps-fn, and apply it
   `((cps-fn* nil
@@ -222,12 +268,21 @@ Simply specify the function the same way you would use fn."
 
 (defmacro cps-form [cont form]
   #_(println "form: " form)
+  ;; TODO: handle forms that expand to an atomic expression
   (let [expanded (macroexpand form)
-        [action & body] expanded
+        [operator & operands] expanded
         f (gensym)]
-    (if (special-symbol? action)
+    (if (or (special-symbol? operator)
+            (and (symbol? operator)
+                 (contains? *special-form-handlers* (resolve operator))))
+      ;; then (handle as a "special form")
       `(cps-special-form ~cont ~expanded)
-      `(cps-call ~cont ~@expanded))))
+      ;; else (check to see if expansion is complete)
+      (if (identical? form expanded)
+        ;; then (handle as function call)
+        `(cps-call ~cont ~@expanded)
+        ;; else (try to expand again)
+        `(cps-form ~cont ~expanded)))))
 
 (defmacro cps-call
   "Macro that transforms a function call.
@@ -266,17 +321,17 @@ Parameters:
                     ;; evaluate first unevaluated argument
                     ~(first unevaled))))))
 
-(defmacro cps-special-form [cont [action & body]]
-  (case action
-    def `(cps-def ~cont ~@body)
-    do `(cps-do ~cont ~@body)
-    fn* `(cps-fn* ~cont ~@body)
-    if `(cps-if ~cont ~@body)
-    let* `(cps-let* ~cont ~@body)
-    letfn* `(cps-letfn* ~cont ~@body)
-    quote `(cps-quote ~cont ~@body)
-    set! `(cps-set! ~cont ~@body)
-    var `(cps-var ~cont ~@body)))
+(defmacro cps-special-form [cont form]
+  (let [[operator & body] form
+        operator-id (if (special-symbol? operator)
+                        operator
+                        (resolve operator))
+        handler (get *special-form-handlers* operator-id)]
+    (if handler
+      ;; then (apply handler)
+      (handler form &env cont)
+      ;; else (throw exception)
+      (throw (new IllegalArgumentException (str "No matching clause: " operator))))))
 
 (defmacro cps-def
   ([cont name]
