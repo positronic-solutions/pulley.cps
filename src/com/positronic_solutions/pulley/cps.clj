@@ -364,7 +364,8 @@ Parameters:
       ;; then (apply handler)
       (handler form &env cont env)
       ;; else (throw exception)
-      (throw (new IllegalArgumentException (str "No matching clause: " operator))))))
+      (throw (new UnsupportedOperationException
+                  (str "No CPS transformer found for form: " operator))))))
 
 (defmacro cps-binding
   ([cont env bindings & body]
