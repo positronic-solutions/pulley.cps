@@ -1,4 +1,4 @@
-(require '[com.positronic-solutions.cps :as cps])
+(require '[com.positronic-solutions.pulley.cps :as cps])
 
 (declare pong)
 

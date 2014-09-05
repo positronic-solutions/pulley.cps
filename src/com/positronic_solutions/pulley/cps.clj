@@ -1,7 +1,7 @@
 ;; Copyright 2014 Positronic Solutions, LLC.
 ;; All rights reserved.
 
-(ns com.positronic-solutions.cps)
+(ns com.positronic-solutions.pulley.cps)
 
 (def ^:dynamic *trampoline-depth*
   "Records the number of trampolines active on the current stack."
