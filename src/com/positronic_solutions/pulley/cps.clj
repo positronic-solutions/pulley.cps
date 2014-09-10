@@ -476,13 +476,15 @@ Otherwise, the resulting form will evaluate direcly to the function."
     `(cps-do ~cont ~env
              ~@body)
     ;; else (at least one more binding => evaluate and bind first binding)
-    (let [[name expr & rest-bindings] bindings]
-      `(cps-expr (fn [~name]
-                   (cps-let* ~cont ~env
-                             ~rest-bindings
-                             ~@body))
-                 ~env
-                 ~expr))))
+    (let [contv (gensym "continuation_")
+          [name expr & rest-bindings] bindings]
+      `(let [~contv ~cont]
+         (cps-expr (fn [~name]
+                     (cps-let* ~contv ~env
+                               ~rest-bindings
+                               ~@body))
+                   ~env
+                   ~expr)))))
 
 (defmacro cps-letfn*
   ([cont env bindings & body]
