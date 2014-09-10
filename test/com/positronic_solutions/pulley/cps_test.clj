@@ -33,7 +33,14 @@ to ensure they are equivalent."
      (verify-form-equiv (binding [*foo* 2]
                           *foo*))
      (verify-form-equiv (do (binding [*foo* 2])
-                            *foo*)))))
+                            *foo*)))
+   (verify-form-equiv (binding [*foo* 2
+                                *bar* 5]
+                        (* *foo* *bar*)))
+   #_(verify-form-equiv (+ (binding [*foo* 2
+                                   *bar* (+ *foo* 5)]
+                           (* *foo* *bar*))
+                         (- 1 *foo* *bar*)))))
 
 (deftest test-do
   (without-recursive-trampolines

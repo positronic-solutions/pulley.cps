@@ -404,9 +404,7 @@ Parameters:
                         ;; process the rest of the bindings
                         (cps-binding ~cont ~new-env
                                      ~(vec rest-bindings)
-                                     ~@body)
-                        (cps-do ~cont ~new-env
-                                ~@body)))
+                                     ~@body)))
                     ~env
                     ~value-expr)))))
 
