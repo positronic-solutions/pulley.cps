@@ -575,6 +575,11 @@ Otherwise, the resulting form will evaluate direcly to the function."
                     ~env
                     ~expr)))))
 
+(def call-cc
+  (cps-fn [f]
+    (let-cc [cc]
+      (f cc))))
+
 ;; This example illustrates minimal transformation,
 ;; with manual priming of the trampoline
 (defn factorial-cps1 [n]

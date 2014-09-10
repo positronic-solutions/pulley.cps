@@ -123,7 +123,14 @@ to ensure they are equivalent."
        (is (= 5
               (let [cc (cps (let-cc [cc]
                               cc))]
-                (cc 5))))))))
+                (cc 5))))))
+   (testing "short-circuit via continuation"
+     (is (= "I got here"
+            (with-out-str
+              (cps (let-cc [cc]
+                     (print "I got here")
+                     (cc nil)
+                     (println "But not here")))))))))
 
 (deftest test-letfn
   (without-recursive-trampolines
@@ -152,3 +159,45 @@ to ensure they are equivalent."
    (with-strict-cps
      (verify-form-equiv (var *foo*))
      (verify-form-equiv (var deftest)))))
+
+(deftest test-call-cc
+  ;; Bascially the same tests as with let-cc,
+  ;; except we're using call-cc
+  (without-recursive-trampolines
+   (with-strict-cps
+     (testing "normal return"
+       (is (= 5
+              (cps (call-cc (fn [cc]
+                              5))))))
+     (testing "return via continuation"
+       (is (= 5
+              (cps (call-cc (fn [cc]
+                              (cc 5)))))))
+     (testing "call continuation from outer scope"
+       ;; This is a bit of a twisted test ;-)
+       ;; The continuation of the let-cc form is cc binding
+       ;; so basically, the let body is executed twice.
+       ;; The steps performed are:
+       ;; 1) cc is bound to the continuation
+       ;; 2) cc is called with id,
+       ;;    effectively rebinding cc to the identity function
+       ;; 3) cc is called again with id,
+       ;;    resulting in the identity of the identity function
+       ;; 4) the identity function is returned from the outer let
+       (let [id (cps-fn [x] x)]
+         (is (= id
+                (cps (let [cc (call-cc (fn [$cc]
+                                         $cc))]
+                       (cc id)))))))
+     (testing "call continuation from normal code"
+       (is (= 5
+              (let [cc (cps (call-cc (fn [cc]
+                                       cc)))]
+                (cc 5))))))
+   (testing "short-circuit via continuation"
+     (is (= "I got here"
+            (with-out-str
+              (cps (call-cc (fn [cc]
+                              (print "I got here")
+                              (cc nil)
+                              (println "But not here"))))))))))
