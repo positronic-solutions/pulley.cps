@@ -92,6 +92,39 @@ to ensure they are equivalent."
                             x (+ x y 3)]
                         x))))
 
+(deftest test-let-cc
+  (without-recursive-trampolines
+   (with-strict-cps
+     (testing "normal return"
+       (is (= 5
+              (cps (let-cc [cc]
+                     5)))))
+     (testing "return via continuation"
+       (is (= 5
+              (cps (let-cc [cc]
+                     (cc 5))))))
+     (testing "call continuation from outer scope"
+       ;; This is a bit of a twisted test ;-)
+       ;; The continuation of the let-cc form is cc binding
+       ;; so basically, the let body is executed twice.
+       ;; The steps performed are:
+       ;; 1) cc is bound to the continuation
+       ;; 2) cc is called with id,
+       ;;    effectively rebinding cc to the identity function
+       ;; 3) cc is called again with id,
+       ;;    resulting in the identity of the identity function
+       ;; 4) the identity function is returned from the outer let
+       (let [id (cps-fn [x] x)]
+         (is (= id
+                (cps (let [cc (let-cc [$cc]
+                                $cc)]
+                       (cc id)))))))
+     (testing "call continuation from normal code"
+       (is (= 5
+              (let [cc (cps (let-cc [cc]
+                              cc))]
+                (cc 5))))))))
+
 (deftest test-letfn
   (without-recursive-trampolines
    (with-strict-cps

@@ -200,6 +200,16 @@ Ideally, it will be CPS-transformed."
        (applyTo [this args]
          (clojure.lang.AFn/applyToHelper this args)))))
 
+(defmacro let-cc
+  "Executes body with <cc> bound to the current continuation.
+
+Usage:
+
+    (let-cc [<cc>]
+      <body...>"
+  ([[cc] & body]
+    (throw (new IllegalStateException "let-cc can only be used inside cps and cps-fn forms"))))
+
 (def ^:dynamic *special-form-handlers*
   "Contains a map specifying how special forms are handled.
 
@@ -239,6 +249,8 @@ The handler function must accept the following parameters (in order)
          `(cps-if ~cont ~env ~@body))
    'let* (fn expand-let* [[operator & body] &env cont env]
            `(cps-let* ~cont ~env ~@body))
+   #'let-cc (fn expand-let-cc [[operator & body] &env cont env]
+              `(cps-let-cc ~cont ~env ~@body))
    'letfn* (fn expand-letfn* [[operator & body] &env cont env]
              `(cps-letfn* ~cont ~env ~@body))
    'quote (fn expand-quote [[operator & body] &env cont env]
@@ -485,6 +497,16 @@ Otherwise, the resulting form will evaluate direcly to the function."
                                ~@body))
                    ~env
                    ~expr)))))
+
+(defmacro cps-let-cc
+  "CPS-aware macro for expanding a let-cc form"
+  ([cont env [cc] & body]
+     (let [contv (gensym "continuation_")]
+       `(let [~contv ~cont
+              ~cc (fn->callable (fn [~'$cont ~'$env ~'$value]
+                                  (~contv ~'$value)))]
+          (cps-do ~contv ~env
+                  ~@body)))))
 
 (defmacro cps-letfn*
   ([cont env bindings & body]
