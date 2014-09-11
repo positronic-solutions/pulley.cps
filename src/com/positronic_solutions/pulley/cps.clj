@@ -285,6 +285,31 @@ Simply specify the function the same way you would use fn."
         ;; Otherwise, should be a literal expression
         :else `(~cont ~expr)))
 
+(defmacro cps-exprs
+  "Low-level macro for transforming a sequence of expressions
+and binding their values to variables.
+
+After all expressions have been processed,
+callback is called with a collection of symbols
+which will be bound to the values of the expressions.
+callback should return a form,
+which will be executed in a scope with all these variables.
+Note that callback must be an actual function,
+callable at macro-expansion time,
+not a form representing a function."
+  ([env exprs callback]
+     (if (empty? exprs)
+       ;; then (no exprs => invoke callback with empty collection
+       (callback nil)
+       ;; else (process first expression, then rest recursively)
+       (let [value (gensym "value_")
+             new-callback (fn [values]
+                            (callback (cons value values)))]
+         `(cps-expr (fn [~value]
+                      (cps-exprs ~env ~(rest exprs) ~new-callback))
+                    ~env
+                    ~(first exprs))))))
+
 (defmacro cps-coll [cont env coll]
   (throw (new IllegalStateException "Collection literals are not supported at this time.")))
 
@@ -388,25 +413,27 @@ Parameters:
        ;; then (simply execute the body)
        `(cps-do ~cont ~env
                 ~@body)
-       ;; else (bind the first binding)
-       (let [[name value-expr & rest-bindings] bindings
-             binding-var (resolve name)
-             value (gensym "value_")
-             new-env (gensym "env_")]
-         ;; Check that the var is dynamic
-         (when (not (dynamic? binding-var))
-           (throw (new IllegalStateException
-                       (str "Can't dynamically bind non-dynamic var: "
-                            binding-var))))
-         `(cps-expr (fn [~value]
-                      ;; create a new environment with the new binding
-                      (let [~new-env (assoc ~env ~binding-var ~value)]
-                        ;; process the rest of the bindings
-                        (cps-binding ~cont ~new-env
-                                     ~(vec rest-bindings)
-                                     ~@body)))
-                    ~env
-                    ~value-expr)))))
+       ;; else (process bindings)
+       `(cps-exprs ~env
+          ;; binding expressions
+          ~(for [[name expr] (partition-all 2 bindings)]
+             expr)
+          ;; callback function
+          ~(fn [values]
+             (let [new-env (gensym "env_")]
+               `(let [~new-env
+                      (-> ~env
+                          ~@(map (fn [[name _] value]
+                                   (let [binding-var (resolve name)]
+                                     (when (not (dynamic? binding-var))
+                                       (throw (new IllegalStateException
+                                                   (str "Can't dynamically bind non-dynamic var: "
+                                                        binding-var))))
+                                     `(assoc ~binding-var ~value)))
+                                 (partition-all 2 bindings)
+                                 values))]
+                  (cps-do ~cont ~new-env
+                          ~@body))))))))
 
 (defmacro cps-def
   ([cont env name]
