@@ -339,7 +339,7 @@ not a form representing a function."
     ;; Check to see if we need to handle the form specially
     (if (and (symbol? operator)
              (or (special-symbol? operator)
-                 (contains? *special-form-handlers* (resolve operator))))
+                 (contains? *special-form-handlers* (resolve &env operator))))
       ;; then (handle as a "special form")
       `(cps-special-form ~cont ~env ~form)
       ;; else (attempt to expand)

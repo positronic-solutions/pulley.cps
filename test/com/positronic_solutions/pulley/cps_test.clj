@@ -40,7 +40,11 @@ to ensure they are equivalent."
    (verify-form-equiv (+ (binding [*foo* 2
                                    *bar* (+ *foo* 5)]
                            (* *foo* *bar*))
-                         (- 1 *foo* *bar*)))))
+                         (- 1 *foo* *bar*)))
+   (testing "let-shadowed binding"
+     (with-strict-cps (let [*foo* 10]
+                        (binding [*foo* 20]
+                          *foo*))))))
 
 (deftest test-do
   (without-recursive-trampolines
@@ -208,3 +212,10 @@ to ensure they are equivalent."
                               (print "I got here")
                               (cc nil)
                               (println "But not here"))))))))))
+
+(deftest test-var-resolution
+  (without-recursive-trampolines
+   (with-strict-cps
+     (verify-form-equiv (let [let-cc (fn [x]
+                                       x)]
+                          (let-cc 4))))))
