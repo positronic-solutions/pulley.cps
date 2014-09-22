@@ -42,7 +42,9 @@ Default: false"
     (fn [& args]
       (when *strict-cps*
         (throw (new IllegalStateException "Attempt to call non-CPS routine while *strict-cps* is set.")))
-      (cont (apply f args)))))
+      (let [value (with-bindings env
+                    (apply f args))]
+        (cont value)))))
 
 (defn call [f cont env & args]
   #_(println "call: continuation is " cont)

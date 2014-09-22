@@ -44,7 +44,16 @@ to ensure they are equivalent."
    (testing "let-shadowed binding"
      (with-strict-cps (let [*foo* 10]
                         (binding [*foo* 20]
-                          *foo*))))))
+                          *foo*))))
+   (testing "cps->non-cps"
+     (letfn [(foo-value []
+               *foo*)]
+       (verify-form-equiv (binding [*foo* 20]
+                            (foo-value)))))
+   (testing "non-cps->cps"
+     (binding [*foo* 20]
+       (with-strict-cps
+         (verify-form-equiv *foo*))))))
 
 (deftest test-do
   (without-recursive-trampolines
