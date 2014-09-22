@@ -36,8 +36,6 @@ Default: false"
 
 (extend-protocol ICallable
   clojure.lang.IFn
-  ;; TODO: run f in context with thread-bindings corresponding to env
-  ;;       (use with-bindings?)
   (with-continuation [f cont env]
     (fn [& args]
       (when *strict-cps*
@@ -61,6 +59,7 @@ Default: false"
          ;; TODO: should we pass the current thread bindings
          ;;       as the initial dynamic enviroment,
          ;;       rather than an empty map?
+         ;;       (unfortunately, that is pretty detrimental to performance)
          (loop [value (apply call f identity {} args)]
            (if (satisfies? IThunk value)
              (recur (invoke-thunk value))
