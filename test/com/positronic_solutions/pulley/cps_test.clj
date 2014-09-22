@@ -165,6 +165,53 @@ to ensure they are equivalent."
      (verify-form-equiv '(x y z))
      (verify-form-equiv '(x (y) z)))))
 
+(deftest test-try
+  (without-recursive-trampolines
+   (with-strict-cps
+     (verify-form-equiv (try))
+     (verify-form-equiv (try 10))
+     (let [;; work around unimplemented new
+           exception (new IllegalStateException "test")]
+       (is (thrown-with-msg? IllegalStateException #"test"
+                             (cps (try (throw exception)))))))
+   ;; TODO: Implement handler-case in a way that is compatible
+   ;;       with with-strict-cps
+   (let [;; work around unimplemented new
+         exception (new IllegalStateException "test")]
+     (verify-form-equiv (try
+                          (throw exception)
+                          10
+                          (catch IllegalStateException ex
+                            ex))))
+   (let [;; work around unimplemented new
+         exception (new RuntimeException "test")]
+     (verify-form-equiv (try
+                          (throw exception)
+                          10
+                          (catch Throwable ex
+                       ex))))
+   ;; TODO: Execute handler with proper dynamic environment
+   #_(let [;; work around unimplemented new
+         exception (new RuntimeException "test")]
+     (is (thrown-with-msg? RuntimeException #"test"
+                           (cps (try
+                                  (throw exception)
+                                  (catch IllegalStateException ex
+                                    20))))))
+   (verify-form-equiv (let [a (atom nil)]
+                        (vector (try
+                                  10
+                                  (finally (reset! a 20)))
+                                (deref a))))
+   (verify-form-equiv (let [a (atom nil)
+                            b (atom nil)]
+                        (vector (try
+                                  10
+                                  (finally (reset! a 20)
+                                           (reset! b 30)))
+                                (deref a)
+                                (deref b))))))
+
 (deftest test-var-form
   (without-recursive-trampolines
    (with-strict-cps

@@ -41,7 +41,9 @@ Default: false"
   (with-continuation [f cont env]
     (fn [& args]
       (when *strict-cps*
-        (throw (new IllegalStateException "Attempt to call non-CPS routine while *strict-cps* is set.")))
+        (throw (new IllegalStateException (str "Attempt to call non-CPS routine "
+                                               f
+                                               " while *strict-cps* is set."))))
       (cont (apply f args)))))
 
 (defn call [f cont env & args]
@@ -210,6 +212,15 @@ Usage:
   ([[cc] & body]
     (throw (new IllegalStateException "let-cc can only be used inside cps and cps-fn forms"))))
 
+(defn translate-to
+  "Helper for constructing handler functions
+for translating forms from one language to another.
+Basically, the operator of the input form is replaced
+with the symbol parameter."
+  ([symbol]
+     (fn [[operator & body] &env cont env]
+       `(cps-expr ~cont ~env (~symbol ~@body)))))
+
 (def ^:dynamic *special-form-handlers*
   "Contains a map specifying how special forms are handled.
 
@@ -257,8 +268,12 @@ The handler function must accept the following parameters (in order)
             `(cps-quote ~cont ~env ~@body))
    'set! (fn expand-set! [[operator & body] &env cont env]
            `(cps-set! ~cont ~env ~@body))
+   'throw (translate-to `raise)
+   'try (fn expand-try [[operator & body] &env cont env]
+          `(cps-try ~cont ~env ~@body))
    'var (fn expand-var [[operator & body] &env cont env]
-          `(cps-var ~cont ~env ~@body))})
+          `(cps-var ~cont ~env ~@body))
+   #'clojure.core/bound-fn* (translate-to `cps-bound-fn*)})
 
 (defmacro cps [& body]
   ;; Create a cps-fn, and apply it
@@ -582,6 +597,39 @@ Otherwise, the resulting form will evaluate direcly to the function."
                   ~env
                   ~expr))))
 
+(defmacro cps-try
+  ([cont env & exprs]
+     (let [catch-block? (fn [expr]
+                          (and (seq? expr)
+                               (= `catch (first expr))))
+           finally-block? (fn [expr]
+                            (and (seq? expr)
+                                 (= `finally (first expr))))
+           body-expr? (fn [expr]
+                        (not (and (seq? expr)
+                                  (or (catch-block? expr)
+                                      (finally-block? expr)))))
+           protected-exprs (filter body-expr? exprs)
+           catch-blocks (filter catch-block? exprs)
+           finally-blocks (filter finally-block? exprs)]
+       (when (> (count finally-blocks) 1)
+         (throw (new RuntimeException "finally clause must be last in try expression")))
+       (let [protected-form `(do ~@protected-exprs)
+             handler-case-form (if (empty? catch-blocks)
+                        protected-form
+                        `(handler-case ~protected-form
+                                       ~@(map (fn [[_ ex-type name & body]]
+                                                `(~ex-type [~name]
+                                                           ~@body))
+                                              catch-blocks)))
+             unwind-protect-form (if (empty? finally-blocks)
+                                   handler-case-form
+                                   `(unwind-protect ~handler-case-form
+                                                    ~@(-> finally-blocks
+                                                          (first)
+                                                          (rest))))]
+         `(cps-expr ~cont ~env ~unwind-protect-form)))))
+
 (defmacro cps-var
   ([cont env symbol]
      `(~cont (var ~symbol))))
@@ -604,6 +652,75 @@ Otherwise, the resulting form will evaluate direcly to the function."
   (cps-fn [f]
     (let-cc [cc]
       (f cc))))
+
+(def ^:dynamic *exception-handler*
+  nil)
+
+(def primitive-raise
+  (fn->callable (fn [cont env ex]
+                  (throw ex))))
+
+(def raise
+  (cps-fn [ex]
+    (if-let [handler *exception-handler*]
+      (handler ex)
+      (primitive-raise ex))))
+
+(defmacro with-exception-handler
+  "Executes body in a context with f installed
+as the exception handler function."
+  ;; TODO: Implement this in a CPS-agnostic manner.
+  ;;       That is, if we aren't in the CPS compiler,
+  ;;       convert this to the try-catch block.
+  ([f & body]
+     `(binding [*exception-handler* ~f]
+        ~@body)))
+
+(defmacro handler-case
+  "Executes protected in an environment with the specified exception-handlers
+installed as exception handlers.
+If protected exits normally, handler-case returns its value.
+Otherwise (if protected throws an exception),
+the first exception-handler that matches the thrown exception type
+will be invoked.
+If no matching handler is found, the exception is re-thrown.
+
+exception-handlers => exception-handler*
+
+exception-handler => (exception-type [name] & handler-body)
+* exception-type - Type of exception to be handled by this case.
+                   An exception will match this case if it is of this type
+                   or a sub-type of this type.
+* name - Name (variable) to which the thrown exception will be bound.
+* handler-body - sequence of expressions to be evaluated
+                 when a matching exception is thrown."
+  ([protected & exception-handlers]
+     (let [cc (gensym "cc_")
+           ex (gensym "ex_")]
+       `(let-cc [~cc]
+          (with-exception-handler
+            (fn [~ex]
+              (~cc (cond ~@(mapcat (fn [[ex-t [ex-v] & body]]
+                                    [`(instance? ~ex-t ~ex)
+                                     `(let [~ex-v ~ex]
+                                        ~@body)])
+                                  exception-handlers)
+                        :else (throw ~ex))))
+            ~protected)))))
+
+(defmacro unwind-protect
+  ([protected & cleanup]
+     (let [cleanup-thunk (gensym "cleanup-thunk_")
+           ex (gensym "ex_")
+           result (gensym "value_")]
+       `(let [~cleanup-thunk (fn []
+                               ~@cleanup)
+              ~result (with-exception-handler (fn [~ex]
+                                                (~cleanup-thunk)
+                                                (throw ~ex))
+                        ~protected)]
+          (~cleanup-thunk)
+          ~result))))
 
 ;; This example illustrates minimal transformation,
 ;; with manual priming of the trampoline
