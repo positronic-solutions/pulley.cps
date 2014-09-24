@@ -228,3 +228,21 @@ to ensure they are equivalent."
      (verify-form-equiv (let [let-cc (fn [x]
                                        x)]
                           (let-cc 4))))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; Test CPS overrides of select core functions ;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(deftest test-with-bindings
+  (without-recursive-trampolines
+   (with-strict-cps
+     (with-bindings {#'*foo* 10}
+       (verify-form-equiv *foo*)))
+   ;; TODO: evaluate these with-strict-cps
+   ;;       once collection literals are implemented
+   (verify-form-equiv (with-bindings* (hash-map #'*foo* 10)
+                        (fn []
+                          *foo*)))
+   (verify-form-equiv (with-bindings (hash-map #'*foo* 10)
+                        *foo*))))

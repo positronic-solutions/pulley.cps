@@ -601,10 +601,36 @@ Otherwise, the resulting form will evaluate direcly to the function."
                     ~env
                     ~expr)))))
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; Runtime Library ;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (def call-cc
   (cps-fn [f]
     (let-cc [cc]
       (f cc))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; CPS overrides of select core functions ;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; CPS override of with-bindings*
+(extend-type (type with-bindings*)
+  ICallable
+  (with-continuation [self cont env]
+    (fn [binding-map f & args]
+      (let [full-env (merge-with (fn [a b]
+                                   b)
+                                 env
+                                 binding-map)]
+        (thunk (apply call f cont full-env args))))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; Factorial sample ;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; This example illustrates minimal transformation,
 ;; with manual priming of the trampoline
