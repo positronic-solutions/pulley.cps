@@ -246,3 +246,22 @@ to ensure they are equivalent."
                           *foo*)))
    (verify-form-equiv (with-bindings (hash-map #'*foo* 10)
                         *foo*))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; Tests for select core functions ;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(deftest test-bound-fn
+  (without-recursive-trampolines
+   (with-strict-cps
+     (testing "verify bound-fn can be used with strict-cps"
+       (binding [*foo* 10]
+         (verify-form-equiv (let [f (bound-fn []
+                                      *foo*)]
+                              (binding [*foo* 20]
+                                (f)))))))
+   (binding [*foo* 10]
+     (verify-form-equiv (let [f (bound-fn [x]
+                                  (+ x *foo*))]
+                          (binding [*foo* 20]
+                            (f *foo*)))))))

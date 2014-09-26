@@ -1,7 +1,8 @@
 ;; Copyright 2014 Positronic Solutions, LLC.
 ;; All rights reserved.
 
-(ns com.positronic-solutions.pulley.cps)
+(ns com.positronic-solutions.pulley.cps
+  (:require [clojure.repl :as repl]))
 
 (def ^:dynamic *trampoline-depth*
   "Records the number of trampolines active on the current stack."
@@ -38,8 +39,12 @@ Default: false"
   clojure.lang.IFn
   (with-continuation [f cont env]
     (fn [& args]
+      #_(println "Calling native fn: " f args)
       (when *strict-cps*
-        (throw (new IllegalStateException "Attempt to call non-CPS routine while *strict-cps* is set.")))
+        (throw (new IllegalStateException
+                    (str "Attempt to call non-CPS routine "
+                         f
+                         " while *strict-cps* is set."))))
       (let [value (with-bindings env
                     (apply f args))]
         (cont value)))))
@@ -47,7 +52,8 @@ Default: false"
 (defn call [f cont env & args]
   #_(println "call: continuation is " cont)
   #_(println "call: env is " env)
-  ;; thunk this (so we don't have to thunk it everywhere it's called)?
+  #_(println "calling " f args)
+  ;; TODO: thunk this (so we don't have to thunk it everywhere it's called)?
   (apply (with-continuation f cont env) args))
 
 (defn trampoline
@@ -612,9 +618,88 @@ Otherwise, the resulting form will evaluate direcly to the function."
       (f cc))))
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; Helper macros for generating CPS overrides of native functions ;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defmacro override-fn
+  "Used to provide a CPS-transformed version of an existing native function.
+
+This macro generates a CPS override for the specified function
+from the provided implementation code (in fn-tails).
+The provided implementation code is CPS-transformed
+and will be called (as a CPS routine) when the specified function is called
+from within another CPS routine.
+This effectively replaces the native implementation
+with a CPS implementation in such cases.
+
+name is the function to override.
+
+fn-tails are function parameter list(s) and body(ies),
+as would be used in a fn or cps-fn form.
+These are enclosed in a cps-fn form and sent through the CPS compiler."
+  ([name & fn-tails]
+     (let [f (gensym "f_")]
+       `(let [~f (cps-fn ~@fn-tails)]
+          (extend-type (type ~name)
+            ICallable
+            (with-continuation [~'self ~'cont ~'env]
+              (with-continuation ~f ~'cont ~'env)))))))
+
+(defmacro auto-override-fn
+  "Attempts to automatically generate a CPS override for a function
+from its native definition.
+This requires that the source code be for the function
+is discoverable.
+Currently, this is done via clojure.repl/source-fn.
+If the source for the function can not be located,
+a compile-time exception is thrown.
+
+name is the name (symbol) of the function to override.
+
+This macro is useful to cases where
+a) the source code for a function is discoverable, and
+b) that code can be transformed as-is by the CPS compiler
+   (i.e., it does not contain unsupported forms)
+If those conditions are satisfied, this macro is a great way
+to provide a CPS implementation of a function
+without the need to duplicate the code."
+  ([name]
+     ;; TODO: Is there a better way to get the source
+     ;;       for a function than relying on clojure.repl?
+     (if-let [code (repl/source-fn name)]
+       ;; then (got source)
+       (let [fn-tails (-> code
+                          (read-string)
+                          (macroexpand)
+                          (nth 2)
+                          (rest))]
+         `(override-fn ~name ~@fn-tails))
+       ;; else (couldn't get source)
+       (throw (new IllegalStateException
+                   (str "Couldn't find source for function " name))))))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; CPS overrides of select core functions ;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(auto-override-fn bound-fn*)
+
+;; CPS override of apply
+(extend-type (type apply)
+  ICallable
+  (with-continuation [self cont env]
+    (fn [f & args]
+      (apply call f cont env (apply list* args)))))
+
+;; CPS override of get-thread-bindings
+(extend-type (type get-thread-bindings)
+  ICallable
+  (with-continuation [self cont env]
+    (fn []
+      (cont (merge (get-thread-bindings)
+                   env)))))
 
 ;; CPS override of with-bindings*
 (extend-type (type with-bindings*)
