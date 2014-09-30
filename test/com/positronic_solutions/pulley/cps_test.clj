@@ -167,6 +167,12 @@ to ensure they are equivalent."
                                   (even? (dec x))))]
                         (map even? (range 10))))))
 
+(deftest test-new
+  (without-recursive-trampolines
+   (verify-form-equiv (new java.util.Hashtable))
+   (verify-form-equiv (new clojure.lang.MapEntry :a :b))
+   (verify-form-equiv (new clojure.lang.MapEntry (+ 1 2) (- 5 2)))))
+
 (deftest test-quote
   (without-recursive-trampolines
    (with-strict-cps

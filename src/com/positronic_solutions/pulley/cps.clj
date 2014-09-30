@@ -260,6 +260,8 @@ The handler function must accept the following parameters (in order)
               `(cps-let-cc ~cont ~env ~@body))
    'letfn* (fn expand-letfn* [[operator & body] &env cont env]
              `(cps-letfn* ~cont ~env ~@body))
+   'new (fn expand-new [[operator & body] &env cont env]
+          `(cps-new ~cont ~env ~@body))
    'quote (fn expand-quote [[operator & body] &env cont env]
             `(cps-quote ~cont ~env ~@body))
    'set! (fn expand-set! [[operator & body] &env cont env]
@@ -569,6 +571,16 @@ Otherwise, the resulting form will evaluate direcly to the function."
                                   ~(:fn-form binding))))
           (cps-do ~cont ~env
                   ~@body)))))
+
+(defmacro cps-new
+  ([cont env class & params]
+     (let [f (gensym "new_")]
+       `(cps-exprs ~env
+                   ~params
+                   ~(fn [params]
+                      `(let [~f (fn []
+                                  (new ~class ~@params))]
+                         (thunk (call ~f ~cont ~env))))))))
 
 (defmacro cps-quote
   ([cont env & body]
