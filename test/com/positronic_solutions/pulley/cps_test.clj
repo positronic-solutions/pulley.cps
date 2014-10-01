@@ -63,6 +63,21 @@ to ensure they are equivalent."
                           (+ 2 3)
                           (+ 3 4)))))
 
+(deftest test-dot
+  (let [entry (new clojure.lang.MapEntry :a :b)]
+    (without-recursive-trampolines
+     (verify-form-equiv (. entry key))
+     (verify-form-equiv (. entry (val)))
+     (verify-form-equiv (+ (. (new clojure.lang.MapEntry 1 2) (key))
+                           (. (new clojure.lang.MapEntry 3 4) val)))
+     (verify-form-equiv (. Math sqrt (* 10 10)))
+     (verify-form-equiv (. Math (sqrt (* 10 10))))
+     (verify-form-equiv (Math/sqrt 250000))
+     (verify-form-equiv (Math/sqrt (* 500 500)))
+     (is (thrown? IllegalStateException
+                  (with-strict-cps
+                    (cps (. entry key))))))))
+
 (deftest test-fn
   (without-recursive-trampolines
    (with-strict-cps

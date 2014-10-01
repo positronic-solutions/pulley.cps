@@ -244,7 +244,9 @@ The handler function must accept the following parameters (in order)
                 that will be available when the form is executed
                 (i.e., a map containing the var->value bindings
                 for dynamic vars)"
-  {#'binding (fn expand-binding [[operator & body] &env cont env]
+  {'. (fn expand-dot [[operator & body] &env cont env]
+        `(cps-dot ~cont ~env ~@body))
+   #'binding (fn expand-binding [[operator & body] &env cont env]
                `(cps-binding ~cont ~env ~@body))
    'def (fn expand-def [[operator & body] &env cont env]
           `(cps-def ~cont ~env ~@body))
@@ -459,6 +461,45 @@ Parameters:
                     (~cont (def ~name ~doc ~value)))
                   ~env
                   ~expr))))
+
+(defmacro cps-dot
+  ([cont env & body]
+     (when (< (count body) 2)
+       (throw (new IllegalArgumentException
+                   (str "Malformed member expression: "
+                        (cons '. body)))))
+     (let [[obj member & args] body]
+       (if (and (empty? args)
+                (seq? member))
+         ;; then (expand sequence of arguments)
+         (if (symbol? (first member))
+           `(cps-dot ~cont ~env ~obj ~@member)
+           (throw (new IllegalArgumentException
+                       (str "Malformed member expression: "
+                            (cons '. body)))))
+         ;; else (process member expression)
+         (let [v (gensym "v_")]
+           (let [obj-is-class (and (symbol? obj)
+                                   (class? (resolve &env obj)))
+                 k (fn [params]
+                     `(thunk (call (fn []
+                                     (. ~(if obj-is-class
+                                           ;; then (use class directly)
+                                           obj
+                                           ;; else (use bound value)
+                                           v)
+                                        ~member
+                                        ~@params))
+                                   ~cont
+                                   ~env)))]
+             (if obj-is-class
+               ;; then (use class directly)
+               `(cps-exprs ~env ~args ~k)
+               ;; else (bind value)
+               `(cps-expr (fn [~v]
+                            (cps-exprs ~env ~args ~k))
+                          ~env
+                          ~obj))))))))
 
 (defmacro cps-fn*
   "Constructs a CPS-transformed function
