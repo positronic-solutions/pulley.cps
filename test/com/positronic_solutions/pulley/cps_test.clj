@@ -55,6 +55,22 @@ to ensure they are equivalent."
        (with-strict-cps
          (verify-form-equiv *foo*))))))
 
+(deftest test-collections
+  (without-recursive-trampolines
+   (testing "Simple collection literals"
+     (with-strict-cps
+       (verify-form-equiv [1 2 3])
+       (verify-form-equiv #{1 2 3})
+       (verify-form-equiv {:a 1 :b 2 :c 3})))
+   (testing "Collection literals with complex expressions"
+     (verify-form-equiv [(+ 1 2) (* 3 4) (- 10 5)])
+     (verify-form-equiv #{(+ 1 2) (* 3 4) (- 10 5)})
+     (verify-form-equiv {(+ 1 2) (* 3 4) :a (- 10 5) (* 10 5) :b}))
+   (testing "Nested collection literals"
+     (verify-form-equiv [1 2 [3 4] #{5 6} :a {7 8 9 10}])
+     (verify-form-equiv #{1 2 [3 4] #{5 6} :a {7 8 9 10}})
+     (verify-form-equiv {1 2 [3 4] #{5 6} :a {7 8 9 10}}))))
+
 (deftest test-do
   (without-recursive-trampolines
    (with-strict-cps

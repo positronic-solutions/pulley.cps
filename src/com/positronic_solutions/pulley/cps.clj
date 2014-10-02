@@ -321,8 +321,27 @@ not a form representing a function."
                     ~env
                     ~(first exprs))))))
 
-(defmacro cps-coll [cont env coll]
-  (throw (new IllegalStateException "Collection literals are not supported at this time.")))
+(defmacro cps-coll
+  ([cont env coll]
+     (cond
+       ;; MapEntry's need to be handled specially,
+       ;; because empty returns nil for them.
+       ;; At least for now, we simply convert them to vectors.
+       (instance? clojure.lang.MapEntry coll)
+       `(cps-coll ~cont ~env ~(vec coll))
+
+       ;; Handle every other case
+       :else
+       `(cps-exprs ~env
+                   ~(seq coll)
+                   ~(fn [vars]
+                      (if-let [empty-coll (empty coll)]
+                        `(~cont (conj ~(empty coll)
+                                      ~@vars))
+                        (throw (new IllegalStateException
+                                    (str "Conversion of literal "
+                                         (print-str (type coll))
+                                         " is not supported at this time")))))))))
 
 (defn dynamic? [resolved-var]
   (:dynamic (meta resolved-var)))
