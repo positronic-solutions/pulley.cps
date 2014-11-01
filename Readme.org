@@ -202,8 +202,21 @@
    They are basically equivalent
    to Scheme's =call/cc= and =let/cc= respectively.
 ** CPS Overrides
-   * =override-fn=
-   * =auto-override-fn=
+   In order to enhance the interoperability between CPS code and existing code,
+   =pulley.cps= provides the ability to "override" an existing Clojure function
+   with a CPS implementation.
+   Although it is possible to do this directly via low-level interfaces,
+   it is recommended to use one of the following macros:
+   * =override-fn= :: Overrides the given function
+                      with the provided implementation
+   * =auto-override-fn= :: A convenience macro
+        than attempts to automatically override a function from its source.
+        Success depends on the following conditions.
+        Failure to meet either condition will result in an exception
+        at compile time.
+     1. =clojure.repl/source-fn= must be able
+        to find the source of the function.
+     2. The CPS compiler must be able to transform the code.
 *** Overridden Core Functions
     =pulley.cps= provides CPS overrides
     for the following =clojure.core= functions:
