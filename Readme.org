@@ -233,9 +233,85 @@
     while the call to =apply= itself will be within the same context,
     the actual application of the non-CPS function
     will necessarily cause a transition to a non-CPS context.
-** Low-Level Hooks and Interfaces
-*** Trampolines, Thunks, and Callables
+** Low-Level Implementation, Hooks, and Interfaces
+*** Trampolines, Thunks, and Callables (runtime implementation details)
+    This section explains in some detail the fundamental runtime implementation
+    of CPS code, as well as the protocols and other interfaces involved.
+    This should be relied upon as little as possible,
+    but the information is provided in case you absolutely need it,
+    want to develop =pulley.cps= further,
+    or are just plain curious in how =pulley.cps= operates.
+
+    CPS functions defined by =cps-fn= implement the =IFn= interface.
+    This means they can be called as a normal function from non-CPS code.
+    The implemented =invoke= methods in turn invoke a trampoline,
+    via =pulley.cps/trampoline=.
+
+    The =trampoline= function accepts an =ICallable= object
+    and the function arguments.
+    =ICallable= is a protocol that serves as the CPS analog to =IFn=.
+    =ICallable= defines a single method, =with-continuation=.
+    =with-continuation= accepts a continuation and a dynamic environment,
+    and must return an =IFn= which, when invoked,
+    will execute the CPS code for the function
+    with the continuation and environment provided via =with-continuation=.
+    This =IFn= may return an =IThunk=,
+    which represents the remainder of the computation.
+    Otherwise, if anything other than an =IThunk= is returned,
+    the trampoline terminates and returns that value.
+
+    A continuation is simply an =IFn= that takes a single argument —
+    the result of the previous computation.
+    A dynamic environment is an =IPersistentMap= mapping =Vars= to values.
+
+    The =call= function provides a convenient way to call an =ICallable=.
+    If you need to manually transform some code,
+    it is recommended to use =call= instead of =with-continuation= directly.
+    Note that invocations of =call= should almost certainly be delayed
+    via an =IThunk=.
+    The =thunk= macro provides a convenient way to construct an =IThunk=
+    for a given expression(s).
+
+    The CPS compiler transforms all function calls
+    to invocations of the =call= function.
+    Thus all function calls from CPS code go through the =ICallable= interface.
+
+    =ICallable= is extended to =IFn=, providing a default implementation
+    that invokes the =IFn= on the native stack.
+    This allows non-CPS functions to be invoked by CPS code
+    without any special handling — it's all handled by =ICallable=.
 *** =*special-form-handlers*=
+    Although most input forms are transformed either as macros
+    or function applications,
+    sometimes a form needs to be handled specially.
+    This applies not only to Clojure special forms,
+    but the occasional macro as well.
+    For example, =pulley.cps= handles =binding= forms specially
+    because CPS code uses a different mechanism to pass the dynamic environment
+    than native Clojure does.
+
+    The =*special-form-handlers*= dynamic var provides hook
+    to identify handlers for these forms.
+    Since it is dynamic, the behaviour of the CPS compiler can be affected
+    by altering the compile-time dynamic environment.
+
+    When a form is translated, and its operator is a symbol,
+    the compiler performs the following checks.
+
+    1. If =*special-form-handlers*= contains an entry for the symbol,
+       then the form is passed to the associated function.
+       This should be used to handle Clojure special forms,
+       since special form symbols do not resolve to a =Var=.
+    2. If the symbol resolves to a =Var= contained in =*special-form-handlers*=,
+       then the form is passed to the associated function.
+       This should be used to provide special handling of a Clojure macro.
+
+    So the keys of =*special-form-handlers*=
+    are either symbols (for special forms) or =Vars= (for everything else).
+    The values are functions that handle the form.
+    In addition to the input form itself, the handler functions take a number
+    of additional arguments.
+    See the docstring for =*special-form-handlers*= for details.
 * Contributing
   We sincerely hope you enjoy using =pulley.cps=
   and are able to use it to your advantage.
