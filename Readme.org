@@ -35,7 +35,7 @@
   * function definitions (you can create a =fn=)
   * special forms: =.= (dot), =def=, =do=, =fn*=, =if=,
     =let*=, =letfn*=, =new=, =quote=, and =var=
-  * any and all macros that reduce to transformable code
+  * any and all macros that expand to transformable code
   * collection literals
 
   In other words, if there's a reasoable way to transform the code,
@@ -126,7 +126,7 @@
 **** Tail Recursion
      The previous example does not use tail recursion.
      While calls to =factorial= will use a constant amount
-     of Java stack space, they will still consume heap space
+     of Java /stack/ space, they will still consume /heap/ space
      linearly with respect to =n=.
 
      If, however, we transform =factorial= to use accumulator passing style,
