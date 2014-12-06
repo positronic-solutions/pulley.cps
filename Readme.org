@@ -233,6 +233,36 @@
     while the call to =apply= itself will be within the same context,
     the actual application of the non-CPS function
     will necessarily cause a transition to a non-CPS context.
+** Setting and Testing Limits
+   By default, =pulley.cps= does not restrict
+   transitions between CPS and non-CPS code in any way.
+   However, sometimes you may want to limit the amount of interaction
+   between native Clojure and CPS-transformed code.
+   For example, if your code relies heavily on continuations,
+   you may want to restrict function calls to CPS functions only.
+   To this end, =pulley.cps= provides a number of dynamic vars:
+   * =*strict-cps*= :: When bound to a truthy value,
+                       only calls to CPS functions are allowed.
+                       If a non-CPS function is called,
+                       an =IllegalStateException= is thrown.
+   * =*allow-recursive-trampolines*= :: When bound to a falsey value,
+        then attempts to spawn a trampoline
+        when there is at least one other trampoline on the stack will fail.
+        If a =call= to a CPS function is made from non-CPS code,
+        then an =IllegalStateException= will be thrown
+        if ~*trampoline-depth* >= 1~.
+   * =*trampoline-depth*= :: Records the number of trampolines
+        currently active on the stack.
+   While these vars can be used directly,
+   it is recommended to use the following macros if possible:
+   * =with-strict-cps= :: Executes the body in an environment
+        that does not allow CPS code to call non-CPS code
+        (i.e., =*strict-cps*= is =true=).
+   * =without-recursive-trampolines= :: Executes the body in an environment
+        that does not allow recursive trampolines to be invoked
+        (i.e., =*allow-recursive-trampolines*= is =false=).
+   Although everything in this section carries a fairly high risk of change,
+   the macros will likely prove to be more stable.
 ** Low-Level Implementation, Hooks, and Interfaces
 *** Trampolines, Thunks, and Callables (runtime implementation details)
     This section explains in some detail the fundamental runtime implementation
