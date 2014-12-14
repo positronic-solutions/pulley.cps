@@ -284,6 +284,24 @@ to ensure they are equivalent."
    (verify-form-equiv (with-bindings (hash-map #'*foo* 10)
                         *foo*))))
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; Test forbidden functions ;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(deftest test-forbidden-fn
+  (testing "push-thread-bindings"
+    (is (thrown? IllegalStateException
+                 ;; Use wrong number of arguments here,
+                 ;; to ensure the binding stack is never changed
+                 (cps (push-thread-bindings 1 2 3)))))
+  (testing "pop-thread-bindings"
+    (is (thrown? IllegalStateException
+                 ;; Use wrong number of arguments here,
+                 ;; to ensure the binding stack is never changed
+                 (cps (pop-thread-bindings 1 2 3))))))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; Tests for select core functions ;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

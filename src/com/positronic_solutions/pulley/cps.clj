@@ -751,6 +751,17 @@ without the need to duplicate the code."
        (throw (new IllegalStateException
                    (str "Couldn't find source for function " name))))))
 
+(defn forbid-fn!
+  "Provides a \"CPS Override\" for a fn that throws an IllegalStateException,
+thus effectively preventing the function from being called from a CPS context."
+  ([f]
+     (forbid-fn! f (str "Calling " f " from CPS code is not allowed.")))
+  ([f msg]
+     (extend-type (type f)
+        ICallable
+        (with-continuation [self cont env]
+          (throw (new IllegalStateException msg))))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; CPS overrides of select core functions ;;;;
@@ -783,6 +794,14 @@ without the need to duplicate the code."
                                  env
                                  binding-map)]
         (thunk (apply call f cont full-env args))))))
+
+;; Forbid push-thread-bindings
+(forbid-fn! push-thread-bindings
+            "push-thread-bindings/pop-thread-bindings can not be used in CPS code.  Use a higher-level construct, such as with-bindings, instead.")
+
+;; Forbid pop-thread-bindings
+#_(forbid-fn! pop-thread-bindings
+            "push-thread-bindings/pop-thread-bindings can not be used in CPS code.  Use a higher-level construct, such as with-bindings, instead.")
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
