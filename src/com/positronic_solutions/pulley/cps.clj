@@ -800,7 +800,7 @@ thus effectively preventing the function from being called from a CPS context."
             "push-thread-bindings/pop-thread-bindings can not be used in CPS code.  Use a higher-level construct, such as with-bindings, instead.")
 
 ;; Forbid pop-thread-bindings
-#_(forbid-fn! pop-thread-bindings
+(forbid-fn! pop-thread-bindings
             "push-thread-bindings/pop-thread-bindings can not be used in CPS code.  Use a higher-level construct, such as with-bindings, instead.")
 
 
