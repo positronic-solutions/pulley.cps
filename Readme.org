@@ -206,17 +206,20 @@
    =pulley.cps= provides the ability to "override" an existing Clojure function
    with a CPS implementation.
    Although it is possible to do this directly via low-level interfaces,
-   it is recommended to use one of the following macros:
+   it is recommended to use one of the following:
    * =override-fn= :: Overrides the given function
                       with the provided implementation
    * =auto-override-fn= :: A convenience macro
-        than attempts to automatically override a function from its source.
+        that attempts to automatically override a function from its source.
         Success depends on the following conditions.
         Failure to meet either condition will result in an exception
         at compile time.
      1. =clojure.repl/source-fn= must be able
         to find the source of the function.
      2. The CPS compiler must be able to transform the code.
+   * =forbid-fn!= :: Given a function, will generate a CPS override
+                     for that function that prevents the function
+                     from being called from CPS code.
 *** Overridden Core Functions
     =pulley.cps= provides CPS overrides
     for the following =clojure.core= functions:
@@ -233,6 +236,12 @@
     while the call to =apply= itself will be within the same context,
     the actual application of the non-CPS function
     will necessarily cause a transition to a non-CPS context.
+*** Forbidden Core Functions
+    There are currently two core functions that are forbidden:
+    * =push-thread-bindings=
+    * =pop-thread-bindings=
+    These are low-level functions that should not be used directly anyway.
+    A higher-level construct, such as =with-bindings= should be used instead.
 ** Setting and Testing Limits
    By default, =pulley.cps= does not restrict
    transitions between CPS and non-CPS code in any way.
