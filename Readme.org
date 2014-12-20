@@ -17,10 +17,6 @@
   neither the interfaces nor their implementation have undergone
   significant field testing.
   Interfaces are subject to change without notice.
-  That being said, interfaces will generally not be changed
-  (or will be maintained in a backwards-compatible manner)
-  unless there is a significant technical or organizational advantage
-  to doing so.
 * Features
   =pulley.cps= allows full interaction between CPS and non-CPS code —
   CPS-transformed functions can call regular Clojure functions,
