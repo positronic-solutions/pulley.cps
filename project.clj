@@ -16,7 +16,8 @@
 ;; along with pulley.cps.  If not, see <http://www.gnu.org/licenses/>.
 
 (defproject com.positronic-solutions/pulley.cps "0.1.0-SNAPSHOT"
-  :description "CPS transformation macros and trampoline execution engine"
+  :description "A macro-based CPS transformation compiler and runtime library"
+  :url "https://github.com/positronic-solutions/pulley.cps"
   :license {:name "GNU Lesser General Public License, version 3 or later"
             :url "http://www.gnu.org/licenses/lgpl.html"
             :distribution :repo}
