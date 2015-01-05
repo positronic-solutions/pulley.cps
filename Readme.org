@@ -12,7 +12,7 @@
   It also means that most (but not quite all) code
   that can be compiled by Clojure can be transformed by the CPS compiler.
 
-  =pulley.cpy= is licensed under the GNU Lesser General Public License (LGPL).
+  =pulley.cps= is licensed under the GNU Lesser General Public License (LGPL).
 * Status
   =pulley.cps= is currently very much in the alpha / pre-alpha stage.
   While the features that have been implemented are functional,
