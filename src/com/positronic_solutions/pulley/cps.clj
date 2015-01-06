@@ -1,7 +1,22 @@
 ;; Copyright 2014 Positronic Solutions, LLC.
-;; All rights reserved.
+;;
+;; This file is part of pulley.cps.
+;;
+;; pulley.cps is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU Lesser General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+;;
+;; pulley.cps is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+;;
+;; You should have received a copy of the GNU Lesser General Public License
+;; along with pulley.cps.  If not, see <http://www.gnu.org/licenses/>.
 
-(ns com.positronic-solutions.pulley.cps)
+(ns com.positronic-solutions.pulley.cps
+  (:require [clojure.repl :as repl]))
 
 (def ^:dynamic *trampoline-depth*
   "Records the number of trampolines active on the current stack."
@@ -36,20 +51,23 @@ Default: false"
 
 (extend-protocol ICallable
   clojure.lang.IFn
-  ;; TODO: run f in context with thread-bindings corresponding to env
-  ;;       (use with-bindings?)
   (with-continuation [f cont env]
     (fn [& args]
+      #_(println "Calling native fn: " f args)
       (when *strict-cps*
-        (throw (new IllegalStateException (str "Attempt to call non-CPS routine "
-                                               f
-                                               " while *strict-cps* is set."))))
-      (cont (apply f args)))))
+        (throw (new IllegalStateException
+                    (str "Attempt to call non-CPS routine "
+                         f
+                         " while *strict-cps* is set."))))
+      (let [value (with-bindings env
+                    (apply f args))]
+        (cont value)))))
 
 (defn call [f cont env & args]
   #_(println "call: continuation is " cont)
   #_(println "call: env is " env)
-  ;; thunk this (so we don't have to thunk it everywhere it's called)?
+  #_(println "calling " f args)
+  ;; TODO: thunk this (so we don't have to thunk it everywhere it's called)?
   (apply (with-continuation f cont env) args))
 
 (defn trampoline
@@ -61,6 +79,7 @@ Default: false"
          ;; TODO: should we pass the current thread bindings
          ;;       as the initial dynamic enviroment,
          ;;       rather than an empty map?
+         ;;       (unfortunately, that is pretty detrimental to performance)
          (loop [value (apply call f identity {} args)]
            (if (satisfies? IThunk value)
              (recur (invoke-thunk value))
@@ -248,7 +267,9 @@ The handler function must accept the following parameters (in order)
                 that will be available when the form is executed
                 (i.e., a map containing the var->value bindings
                 for dynamic vars)"
-  {#'binding (fn expand-binding [[operator & body] &env cont env]
+  {'. (fn expand-dot [[operator & body] &env cont env]
+        `(cps-dot ~cont ~env ~@body))
+   #'binding (fn expand-binding [[operator & body] &env cont env]
                `(cps-binding ~cont ~env ~@body))
    'def (fn expand-def [[operator & body] &env cont env]
           `(cps-def ~cont ~env ~@body))
@@ -264,6 +285,8 @@ The handler function must accept the following parameters (in order)
               `(cps-let-cc ~cont ~env ~@body))
    'letfn* (fn expand-letfn* [[operator & body] &env cont env]
              `(cps-letfn* ~cont ~env ~@body))
+   'new (fn expand-new [[operator & body] &env cont env]
+          `(cps-new ~cont ~env ~@body))
    'quote (fn expand-quote [[operator & body] &env cont env]
             `(cps-quote ~cont ~env ~@body))
    'set! (fn expand-set! [[operator & body] &env cont env]
@@ -272,8 +295,7 @@ The handler function must accept the following parameters (in order)
    'try (fn expand-try [[operator & body] &env cont env]
           `(cps-try ~cont ~env ~@body))
    'var (fn expand-var [[operator & body] &env cont env]
-          `(cps-var ~cont ~env ~@body))
-   #'clojure.core/bound-fn* (translate-to `cps-bound-fn*)})
+          `(cps-var ~cont ~env ~@body))})
 
 (defmacro cps [& body]
   ;; Create a cps-fn, and apply it
@@ -325,8 +347,27 @@ not a form representing a function."
                     ~env
                     ~(first exprs))))))
 
-(defmacro cps-coll [cont env coll]
-  (throw (new IllegalStateException "Collection literals are not supported at this time.")))
+(defmacro cps-coll
+  ([cont env coll]
+     (cond
+       ;; MapEntry's need to be handled specially,
+       ;; because empty returns nil for them.
+       ;; At least for now, we simply convert them to vectors.
+       (instance? clojure.lang.MapEntry coll)
+       `(cps-coll ~cont ~env ~(vec coll))
+
+       ;; Handle every other case
+       :else
+       `(cps-exprs ~env
+                   ~(seq coll)
+                   ~(fn [vars]
+                      (if-let [empty-coll (empty coll)]
+                        `(~cont (conj ~(empty coll)
+                                      ~@vars))
+                        (throw (new IllegalStateException
+                                    (str "Conversion of literal "
+                                         (print-str (type coll))
+                                         " is not supported at this time")))))))))
 
 (defn dynamic? [resolved-var]
   (:dynamic (meta resolved-var)))
@@ -466,6 +507,45 @@ Parameters:
                   ~env
                   ~expr))))
 
+(defmacro cps-dot
+  ([cont env & body]
+     (when (< (count body) 2)
+       (throw (new IllegalArgumentException
+                   (str "Malformed member expression: "
+                        (cons '. body)))))
+     (let [[obj member & args] body]
+       (if (and (empty? args)
+                (seq? member))
+         ;; then (expand sequence of arguments)
+         (if (symbol? (first member))
+           `(cps-dot ~cont ~env ~obj ~@member)
+           (throw (new IllegalArgumentException
+                       (str "Malformed member expression: "
+                            (cons '. body)))))
+         ;; else (process member expression)
+         (let [v (gensym "v_")]
+           (let [obj-is-class (and (symbol? obj)
+                                   (class? (resolve &env obj)))
+                 k (fn [params]
+                     `(thunk (call (fn []
+                                     (. ~(if obj-is-class
+                                           ;; then (use class directly)
+                                           obj
+                                           ;; else (use bound value)
+                                           v)
+                                        ~member
+                                        ~@params))
+                                   ~cont
+                                   ~env)))]
+             (if obj-is-class
+               ;; then (use class directly)
+               `(cps-exprs ~env ~args ~k)
+               ;; else (bind value)
+               `(cps-expr (fn [~v]
+                            (cps-exprs ~env ~args ~k))
+                          ~env
+                          ~obj))))))))
+
 (defmacro cps-fn*
   "Constructs a CPS-transformed function
 
@@ -578,6 +658,16 @@ Otherwise, the resulting form will evaluate direcly to the function."
           (cps-do ~cont ~env
                   ~@body)))))
 
+(defmacro cps-new
+  ([cont env class & params]
+     (let [f (gensym "new_")]
+       `(cps-exprs ~env
+                   ~params
+                   ~(fn [params]
+                      `(let [~f (fn []
+                                  (new ~class ~@params))]
+                         (thunk (call ~f ~cont ~env))))))))
+
 (defmacro cps-quote
   ([cont env & body]
      `(~cont (quote ~@body))))
@@ -648,10 +738,10 @@ Otherwise, the resulting form will evaluate direcly to the function."
                     ~env
                     ~expr)))))
 
-(def call-cc
-  (cps-fn [f]
-    (let-cc [cc]
-      (f cc))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Exception Handling ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def ^:dynamic *exception-handler*
   nil)
@@ -722,91 +812,127 @@ exception-handler => (exception-type [name] & handler-body)
           (~cleanup-thunk)
           ~result))))
 
-;; This example illustrates minimal transformation,
-;; with manual priming of the trampoline
-(defn factorial-cps1 [n]
-  (letfn [(factorial-cont [cont n acc]
-            (if (> n 0)
-              ;; (factorial-cont (dec n) (* acc n))
-              (thunk (factorial-cont cont (dec n) (* acc n)))
-              ;; return acc
-              (thunk (cont acc))))]
-    (trampoline factorial-cont identity n 1)))
 
-;; This example illustrates a moderate degree of transformation,
-;; including how letfn could be transformed,
-;; and provides for transparent priming of the trampoline
-(def factorial-cps2
-  (reify
-    ICallable
-    (with-continuation [self cont env]
-      (fn [n]
-        ;; letfn shenanigans
-        ;; Inspired in part by
-        ;; http://cs.brown.edu/courses/cs173/2012/book/Control_Operations.html#(part._.Continuation-.Passing_.Style)
-        ((fn [factorial-tco]
-           (deliver factorial-tco
-                    (reify
-                      ICallable
-                      (with-continuation [self cont env]
-                        (fn [n acc]
-                          (if (> n 0)
-                            (thunk (call @factorial-tco cont env (dec n) (* acc n)))
-                            (thunk (cont acc)))))
+;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; Runtime Library ;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;
 
-                      clojure.lang.IFn
-                      (invoke [self n acc]
-                        (trampoline self n acc))))
-           (thunk (call @factorial-tco cont env n 1)))
-         (promise))))
 
-    clojure.lang.IFn
-    (invoke [self n]
-      (trampoline self n))))
+(def call-cc
+  (cps-fn [f]
+    (let-cc [cc]
+      (f cc))))
 
-;; Basically the same as factorial-cps2,
-;; but simplified using fn->callable
-(def factorial-cps3
-  (fn->callable (fn [cont env n]
-                  ;; letfn shenanigans
-                  ;; Inspired in part by
-                  ;; http://cs.brown.edu/courses/cs173/2012/book/Control_Operations.html#(part._.Continuation-.Passing_.Style)
-                  ((fn [factorial-tco]
-                     (deliver factorial-tco
-                              (reify
-                                ICallable
-                                (with-continuation [self cont env]
-                                  (fn [n acc]
-                                    (if (> n 0)
-                                      (thunk (call @factorial-tco cont env (dec n) (* acc n)))
-                                      (thunk (cont acc)))))
 
-                                clojure.lang.IFn
-                                (invoke [self n acc]
-                                  (trampoline self n acc))))
-                     (thunk (call @factorial-tco cont env n 1)))
-                   (promise)))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; Helper macros for generating CPS overrides of native functions ;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn factorial-loop [n]
-  (loop [n n
-         acc 1]
-    (if (> n 0)
-      (recur (dec n) (* acc n))
-      acc)))
+(defmacro override-fn
+  "Used to provide a CPS-transformed version of an existing native function.
 
-(defn factorial-recur [n]
-  (if (> n 0)
-    (* n (factorial-recur (dec n)))
-    1))
+This macro generates a CPS override for the specified function
+from the provided implementation code (in fn-tails).
+The provided implementation code is CPS-transformed
+and will be called (as a CPS routine) when the specified function is called
+from within another CPS routine.
+This effectively replaces the native implementation
+with a CPS implementation in such cases.
 
-(cps (defn factorial-cps [n]
-       (letfn [(factorial-tco [n acc]
-                 (if (> n 0)
-                   (factorial-tco (dec n) (* n acc))
-                   acc))]
-         (factorial-tco n 1))))
+name is the function to override.
 
-(cps (defn factorial-recur-cps [n]
-       (if (> n 0)
-         (* n (factorial-recur-cps (dec n)))
-         1)))
+fn-tails are function parameter list(s) and body(ies),
+as would be used in a fn or cps-fn form.
+These are enclosed in a cps-fn form and sent through the CPS compiler."
+  ([name & fn-tails]
+     (let [f (gensym "f_")]
+       `(let [~f (cps-fn ~@fn-tails)]
+          (extend-type (type ~name)
+            ICallable
+            (with-continuation [~'self ~'cont ~'env]
+              (with-continuation ~f ~'cont ~'env)))))))
+
+(defmacro auto-override-fn
+  "Attempts to automatically generate a CPS override for a function
+from its native definition.
+This requires that the source code be for the function
+is discoverable.
+Currently, this is done via clojure.repl/source-fn.
+If the source for the function can not be located,
+a compile-time exception is thrown.
+
+name is the name (symbol) of the function to override.
+
+This macro is useful to cases where
+a) the source code for a function is discoverable, and
+b) that code can be transformed as-is by the CPS compiler
+   (i.e., it does not contain unsupported forms)
+If those conditions are satisfied, this macro is a great way
+to provide a CPS implementation of a function
+without the need to duplicate the code."
+  ([name]
+     ;; TODO: Is there a better way to get the source
+     ;;       for a function than relying on clojure.repl?
+     (if-let [code (repl/source-fn name)]
+       ;; then (got source)
+       (let [fn-tails (-> code
+                          (read-string)
+                          (macroexpand)
+                          (nth 2)
+                          (rest))]
+         `(override-fn ~name ~@fn-tails))
+       ;; else (couldn't get source)
+       (throw (new IllegalStateException
+                   (str "Couldn't find source for function " name))))))
+
+(defn forbid-fn!
+  "Provides a \"CPS Override\" for a fn that throws an IllegalStateException,
+thus effectively preventing the function from being called from a CPS context."
+  ([f]
+     (forbid-fn! f (str "Calling " f " from CPS code is not allowed.")))
+  ([f msg]
+     (extend-type (type f)
+        ICallable
+        (with-continuation [self cont env]
+          (throw (new IllegalStateException msg))))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; CPS overrides of select core functions ;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(auto-override-fn bound-fn*)
+
+;; CPS override of apply
+(extend-type (type apply)
+  ICallable
+  (with-continuation [self cont env]
+    (fn [f & args]
+      (apply call f cont env (apply list* args)))))
+
+;; CPS override of get-thread-bindings
+(extend-type (type get-thread-bindings)
+  ICallable
+  (with-continuation [self cont env]
+    (fn []
+      (cont (merge (get-thread-bindings)
+                   env)))))
+
+;; CPS override of with-bindings*
+(extend-type (type with-bindings*)
+  ICallable
+  (with-continuation [self cont env]
+    (fn [binding-map f & args]
+      (let [full-env (merge-with (fn [a b]
+                                   b)
+                                 env
+                                 binding-map)]
+        (thunk (apply call f cont full-env args))))))
+
+;; Forbid push-thread-bindings
+(forbid-fn! push-thread-bindings
+            "push-thread-bindings/pop-thread-bindings can not be used in CPS code.  Use a higher-level construct, such as with-bindings, instead.")
+
+;; Forbid pop-thread-bindings
+(forbid-fn! pop-thread-bindings
+            "push-thread-bindings/pop-thread-bindings can not be used in CPS code.  Use a higher-level construct, such as with-bindings, instead.")

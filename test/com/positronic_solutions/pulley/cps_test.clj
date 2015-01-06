@@ -1,3 +1,20 @@
+;; Copyright 2014 Positronic Solutions, LLC.
+;;
+;; This file is part of pulley.cps.
+;;
+;; pulley.cps is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU Lesser General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+;;
+;; pulley.cps is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+;;
+;; You should have received a copy of the GNU Lesser General Public License
+;; along with pulley.cps.  If not, see <http://www.gnu.org/licenses/>.
+
 (ns com.positronic-solutions.pulley.cps-test
   (:use clojure.test
         [clojure.pprint :only [pprint]]
@@ -44,7 +61,32 @@ to ensure they are equivalent."
    (testing "let-shadowed binding"
      (with-strict-cps (let [*foo* 10]
                         (binding [*foo* 20]
-                          *foo*))))))
+                          *foo*))))
+   (testing "cps->non-cps"
+     (letfn [(foo-value []
+               *foo*)]
+       (verify-form-equiv (binding [*foo* 20]
+                            (foo-value)))))
+   (testing "non-cps->cps"
+     (binding [*foo* 20]
+       (with-strict-cps
+         (verify-form-equiv *foo*))))))
+
+(deftest test-collections
+  (without-recursive-trampolines
+   (testing "Simple collection literals"
+     (with-strict-cps
+       (verify-form-equiv [1 2 3])
+       (verify-form-equiv #{1 2 3})
+       (verify-form-equiv {:a 1 :b 2 :c 3})))
+   (testing "Collection literals with complex expressions"
+     (verify-form-equiv [(+ 1 2) (* 3 4) (- 10 5)])
+     (verify-form-equiv #{(+ 1 2) (* 3 4) (- 10 5)})
+     (verify-form-equiv {(+ 1 2) (* 3 4) :a (- 10 5) (* 10 5) :b}))
+   (testing "Nested collection literals"
+     (verify-form-equiv [1 2 [3 4] #{5 6} :a {7 8 9 10}])
+     (verify-form-equiv #{1 2 [3 4] #{5 6} :a {7 8 9 10}})
+     (verify-form-equiv {1 2 [3 4] #{5 6} :a {7 8 9 10}}))))
 
 (deftest test-do
   (without-recursive-trampolines
@@ -53,6 +95,21 @@ to ensure they are equivalent."
    (verify-form-equiv (do (+ 1 2)
                           (+ 2 3)
                           (+ 3 4)))))
+
+(deftest test-dot
+  (let [entry (new clojure.lang.MapEntry :a :b)]
+    (without-recursive-trampolines
+     (verify-form-equiv (. entry key))
+     (verify-form-equiv (. entry (val)))
+     (verify-form-equiv (+ (. (new clojure.lang.MapEntry 1 2) (key))
+                           (. (new clojure.lang.MapEntry 3 4) val)))
+     (verify-form-equiv (. Math sqrt (* 10 10)))
+     (verify-form-equiv (. Math (sqrt (* 10 10))))
+     (verify-form-equiv (Math/sqrt 250000))
+     (verify-form-equiv (Math/sqrt (* 500 500)))
+     (is (thrown? IllegalStateException
+                  (with-strict-cps
+                    (cps (. entry key))))))))
 
 (deftest test-fn
   (without-recursive-trampolines
@@ -157,6 +214,12 @@ to ensure they are equivalent."
                                   false
                                   (even? (dec x))))]
                         (map even? (range 10))))))
+
+(deftest test-new
+  (without-recursive-trampolines
+   (verify-form-equiv (new java.util.Hashtable))
+   (verify-form-equiv (new clojure.lang.MapEntry :a :b))
+   (verify-form-equiv (new clojure.lang.MapEntry (+ 1 2) (- 5 2)))))
 
 (deftest test-quote
   (without-recursive-trampolines
@@ -266,3 +329,58 @@ to ensure they are equivalent."
      (verify-form-equiv (let [let-cc (fn [x]
                                        x)]
                           (let-cc 4))))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; Test CPS overrides of select core functions ;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(deftest test-with-bindings
+  (without-recursive-trampolines
+   (with-strict-cps
+     (with-bindings {#'*foo* 10}
+       (verify-form-equiv *foo*)))
+   ;; TODO: evaluate these with-strict-cps
+   ;;       once collection literals are implemented
+   (verify-form-equiv (with-bindings* (hash-map #'*foo* 10)
+                        (fn []
+                          *foo*)))
+   (verify-form-equiv (with-bindings (hash-map #'*foo* 10)
+                        *foo*))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; Test forbidden functions ;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(deftest test-forbidden-fn
+  (testing "push-thread-bindings"
+    (is (thrown? IllegalStateException
+                 ;; Use wrong number of arguments here,
+                 ;; to ensure the binding stack is never changed
+                 (cps (push-thread-bindings 1 2 3)))))
+  (testing "pop-thread-bindings"
+    (is (thrown? IllegalStateException
+                 ;; Use wrong number of arguments here,
+                 ;; to ensure the binding stack is never changed
+                 (cps (pop-thread-bindings 1 2 3))))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; Tests for select core functions ;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(deftest test-bound-fn
+  (without-recursive-trampolines
+   (with-strict-cps
+     (testing "verify bound-fn can be used with strict-cps"
+       (binding [*foo* 10]
+         (verify-form-equiv (let [f (bound-fn []
+                                      *foo*)]
+                              (binding [*foo* 20]
+                                (f)))))))
+   (binding [*foo* 10]
+     (verify-form-equiv (let [f (bound-fn [x]
+                                  (+ x *foo*))]
+                          (binding [*foo* 20]
+                            (f *foo*)))))))

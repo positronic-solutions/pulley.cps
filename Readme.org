@@ -1,0 +1,366 @@
+* What is =pulley=?
+  =pulley= is the Positronic utility libraries.
+  It is a collection of relatively small, simple libraries
+  developed by [[http://www.positronic-solutions.com][Positronic Solutions, LLC]].
+  It is our pleasure to make them available to the public.
+* What is =pulley.cps=?
+  =pulley.cps= is part of the =pulley= collection of libraries.
+  It provides a source-to-source compiler for transforming normal Clojure code
+  to Clojure code in Continuation Passing Style (CPS),
+  as well as runtime support for executing the transformed code.
+  Here "normal Clojure code", means code that is /not/ written in CPS.
+  It also means that most (but not quite all) code
+  that can be compiled by Clojure can be transformed by the CPS compiler.
+
+  =pulley.cps= is licensed under the GNU Lesser General Public License (LGPL).
+* Status
+  =pulley.cps= is currently very much in the alpha / pre-alpha stage.
+  While the features that have been implemented are functional,
+  neither the interfaces nor their implementation have undergone
+  significant field testing.
+  Interfaces are subject to change without notice.
+* Features
+  =pulley.cps= allows full interaction between CPS and non-CPS code —
+  CPS-transformed functions can call regular Clojure functions,
+  and vice versa.
+
+  Currently supported features include:
+  * application of both "native" and CPS functions
+    (i.e., you can call a function regardless of whether
+    it is a regular Clojure function or one that has been run through
+    the CPS compiler)
+  * calls back and forth between native and CPS functions
+  * function definitions (you can create a =fn=)
+  * special forms: =.= (dot), =def=, =do=, =fn*=, =if=,
+    =let*=, =letfn*=, =new=, =quote=, and =var=
+  * any and all macros that expand to transformable code
+  * collection literals
+
+  In other words, if there's a reasoable way to transform the code,
+  it either is supported or will be in the future.
+
+  =pulley.cps= also provides some features
+  that are not normally available in Clojure:
+  * Full tail-call optimization (TCO) — all tail calls are done
+    in constant space (including =binding= forms).
+  * Continuations (with some caveats)
+** Planned/Future Features
+   Support is being worked on for:
+   * exceptions (=throw=, =try=, =catch=, =finally=)
+
+   The following are currently under consideration for future work:
+   * Common Lisp-style restarts
+   * A way to "escape" transformation
+     (for example, to use an unsupported form)
+   * Smarter transformation
+     (the current compiler uses what Matt Might
+     calls the "[[http://matt.might.net/articles/cps-conversion/][naive transformation]]")
+   * ClojureScript support
+** Unsupported Forms
+   It is the general goal of =pulley.cps= to support any and all forms
+   that can reasonably be translated to CPS.
+   However, there are some forms that are impossible to support directly,
+   because they are deeply involved in Java interop.
+
+   For example, forms that define new Java types
+   (=deftype=, =definterface=, =genclass=, etc.)
+   are difficult to transform in a reasonable manner.
+   Even though the method bodies (of, for example, a =deftype=)
+   could be transformed,
+   invocation of the method would involve the invocation of native code,
+   thus defeating the ability to keep the same CPS context.
+   It might be possible to work around this,
+   but unless and until a suitable solution is developed
+   such forms will not be supported.
+* Usage
+  To use =pulley.cps= in your project,
+  simply include the following dependency in your =project.clj=:
+
+  #+BEGIN_SRC clojure
+    [com.positronic-solutions/pulley.cps "0.1.0-SNAPSHOT"]
+  #+END_SRC
+
+  Note that you will first have to install =pulley.cps=
+  to your local Maven repository.
+
+  Now you just need to =require= =pulley.cps=:
+
+  #+BEGIN_SRC clojure
+    (require '[pulley.cps :as cps])
+  #+END_SRC
+** Basic Usage — Invoking the Compiler / Transforming Forms
+   The compiler is invoked via two macros:
+   * =cps-fn= is used to define a function.
+     It's used just like =clojure.core/fn=,
+     but the body(ies) of the function will be CPS transformed.
+     It returns an =IFn= that executes the CPS code on a trampoline
+     if invoked from a non-CPS context.
+   * =cps= transforms a sequence of expressions.
+     =(cps <body...>)= is equivalent to =((cps-fn [] <body...>))=.
+*** Examples
+**** Defining a function
+     There are a couple options for defining a CPS function.
+     The first way is to use =def= and =cps-fn=.
+     =cps-fn= is the same as Clojure's =fn=,
+     except the function is CPS transformed.
+
+     #+BEGIN_SRC clojure
+       (def factorial
+         (cps/cps-fn [n]
+           (if (> n 0)
+             (* n (factorial (dec n)))
+             1)))
+     #+END_SRC
+
+     You can also use =cps= to wrap the entire definition.
+     Then you can use =defn=:
+
+     #+BEGIN_SRC clojure
+       (cps/cps (defn factorial [n]
+                  (if (> n 0)
+                    (* n (factorial (dec n)))
+                    1)))
+     #+END_SRC
+**** Tail Recursion
+     The previous example does not use tail recursion.
+     While calls to =factorial= will use a constant amount
+     of Java /stack/ space, they will still consume /heap/ space
+     linearly with respect to =n=.
+
+     If, however, we transform =factorial= to use accumulator passing style,
+     we can turn =factorial= into a tail-recursive function.
+     Then calls to =factorial= will consume a constant amount of space
+     with respect to =n= (ignoring any growth in the size of =acc=).
+
+     #+BEGIN_SRC clojure
+       (def factorial
+         (cps/cps-fn [n]
+           (letfn [(factorial-aps [n acc]
+                     (if (> n 0)
+                       (factorial-aps (dec n) (* n acc))
+                       acc))]
+             (factorial-aps n 1))))
+     #+END_SRC
+**** State Machine
+     Of course, Tail Call Optimization (TCO) does not end with simple recursion.
+     Another common application of TCO is implementing a state machine.
+     Instead of encoding the machine as an explicit loop,
+     we encode the machine as a set of mutually-recursive functions.
+
+     For example, suppose we have the following states and transitions:
+     | State | Input   | Next-State     |
+     |-------+---------+----------------|
+     | even  | 0       | odd            |
+     | even  | *       | even           |
+     | even  | <empty> | <return :even> |
+     | odd   | 0       | even           |
+     | odd   | *       | odd            |
+     | odd   | <empty> | <return :odd>  |
+     If =even= is the initial state,
+     then this machine will determine whether a given input sequence
+     contains an even or odd number of zeroes.
+
+     We can impelement this as:
+     #+BEGIN_SRC clojure
+       (def even-or-odd-number-of-zeros?
+         (cps/cps-fn [inputs]
+           (letfn [(even [s]
+                     (if (empty? s)
+                       :even
+                       (let [input (first s)]
+                         (if (= input 0)
+                           (odd (rest s))
+                           (even (rest s))))))
+                   (odd [s]
+                     (if (empty? s)
+                       :odd
+                       (let [input (first s)]
+                         (if (= input 0)
+                           (even (rest s))
+                           (odd (rest s))))))]
+             (even inputs))))
+     #+END_SRC
+** Continuations
+   =pulley.cps= supports "full" continuations with some caveats:
+   * Within a particular CPS context, continuations can be considered
+     "full" continuations with respect to that context.
+   * However, continuations are implicitly delimited
+     by the current CPS context.
+     That is, when a continuation is captured,
+     the continuation is implicitly delimited
+     by the "top-most" transition from non-CPS to CPS code.
+   In other words, we try to capture full continuations
+   to the extent we are able.
+   However, since we can't capture the continuation of non-CPS code,
+   the captured continuation can't cross certain boundaries.
+
+   Capturing the current continuation can be accomplished with =call-cc=.
+   There's also a macro version, =let-cc=,
+   which may be more convenient in some cases.
+   They are basically equivalent
+   to Scheme's =call/cc= and =let/cc= respectively.
+** CPS Overrides
+   In order to enhance the interoperability between CPS code and existing code,
+   =pulley.cps= provides the ability to "override" an existing Clojure function
+   with a CPS implementation.
+   Although it is possible to do this directly via low-level interfaces,
+   it is recommended to use one of the following:
+   * =override-fn= :: Overrides the given function
+                      with the provided implementation
+   * =auto-override-fn= :: A convenience macro
+        that attempts to automatically override a function from its source.
+        Success depends on the following conditions.
+        Failure to meet either condition will result in an exception
+        at compile time.
+     1. =clojure.repl/source-fn= must be able
+        to find the source of the function.
+     2. The CPS compiler must be able to transform the code.
+   * =forbid-fn!= :: Given a function, will generate a CPS override
+                     for that function that prevents the function
+                     from being called from CPS code.
+*** Overridden Core Functions
+    =pulley.cps= provides CPS overrides
+    for the following =clojure.core= functions:
+    * =apply=
+    * =bound-fn*=
+    * =get-thread-bindings=
+    * =with-bindings*=
+    These functions can be called within a CPS context
+    without causing a transition to a non-CPS context per se.
+    For example, if =apply= is called with a CPS context
+    and is passed a CPS function,
+    then that function will be called within the same CPS context.
+    On the other hand, if =apply= is passed a non-CPS function then,
+    while the call to =apply= itself will be within the same context,
+    the actual application of the non-CPS function
+    will necessarily cause a transition to a non-CPS context.
+*** Forbidden Core Functions
+    There are currently two core functions that are forbidden:
+    * =push-thread-bindings=
+    * =pop-thread-bindings=
+    These are low-level functions that should not be used directly anyway.
+    A higher-level construct, such as =with-bindings= should be used instead.
+** Setting and Testing Limits
+   By default, =pulley.cps= does not restrict
+   transitions between CPS and non-CPS code in any way.
+   However, sometimes you may want to limit the amount of interaction
+   between native Clojure and CPS-transformed code.
+   For example, if your code relies heavily on continuations,
+   you may want to restrict function calls to CPS functions only.
+   To this end, =pulley.cps= provides a number of dynamic vars:
+   * =*strict-cps*= :: When bound to a truthy value,
+                       only calls to CPS functions are allowed.
+                       If a non-CPS function is called,
+                       an =IllegalStateException= is thrown.
+   * =*allow-recursive-trampolines*= :: When bound to a falsey value,
+        then attempts to spawn a trampoline
+        when there is at least one other trampoline on the stack will fail.
+        If a =call= to a CPS function is made from non-CPS code,
+        then an =IllegalStateException= will be thrown
+        if ~*trampoline-depth* >= 1~.
+   * =*trampoline-depth*= :: Records the number of trampolines
+        currently active on the stack.
+   While these vars can be used directly,
+   it is recommended to use the following macros if possible:
+   * =with-strict-cps= :: Executes the body in an environment
+        that does not allow CPS code to call non-CPS code
+        (i.e., =*strict-cps*= is =true=).
+   * =without-recursive-trampolines= :: Executes the body in an environment
+        that does not allow recursive trampolines to be invoked
+        (i.e., =*allow-recursive-trampolines*= is =false=).
+   Although everything in this section carries a fairly high risk of change,
+   the macros will likely prove to be more stable.
+** Low-Level Implementation, Hooks, and Interfaces
+*** Trampolines, Thunks, and Callables (runtime implementation details)
+    This section explains in some detail the fundamental runtime implementation
+    of CPS code, as well as the protocols and other interfaces involved.
+    This should be relied upon as little as possible,
+    but the information is provided in case you absolutely need it,
+    want to develop =pulley.cps= further,
+    or are just plain curious in how =pulley.cps= operates.
+
+    CPS functions defined by =cps-fn= implement the =IFn= interface.
+    This means they can be called as a normal function from non-CPS code.
+    The implemented =invoke= methods in turn invoke a trampoline,
+    via =pulley.cps/trampoline=.
+
+    The =trampoline= function accepts an =ICallable= object
+    and the function arguments.
+    =ICallable= is a protocol that serves as the CPS analog to =IFn=.
+    =ICallable= defines a single method, =with-continuation=.
+    =with-continuation= accepts a continuation and a dynamic environment,
+    and must return an =IFn= which, when invoked,
+    will execute the CPS code for the function
+    with the continuation and environment provided via =with-continuation=.
+    This =IFn= may return an =IThunk=,
+    which represents the remainder of the computation.
+    Otherwise, if anything other than an =IThunk= is returned,
+    the trampoline terminates and returns that value.
+
+    A continuation is simply an =IFn= that takes a single argument —
+    the result of the previous computation.
+    A dynamic environment is an =IPersistentMap= mapping =Vars= to values.
+
+    The =call= function provides a convenient way to call an =ICallable=.
+    If you need to manually transform some code,
+    it is recommended to use =call= instead of =with-continuation= directly.
+    Note that invocations of =call= should almost certainly be delayed
+    via an =IThunk=.
+    The =thunk= macro provides a convenient way to construct an =IThunk=
+    for a given expression(s).
+
+    The CPS compiler transforms all function calls
+    to invocations of the =call= function.
+    Thus all function calls from CPS code go through the =ICallable= interface.
+
+    =ICallable= is extended to =IFn=, providing a default implementation
+    that invokes the =IFn= on the native stack.
+    This allows non-CPS functions to be invoked by CPS code
+    without any special handling — it's all handled by =ICallable=.
+*** =*special-form-handlers*=
+    Although most input forms are transformed either as macros
+    or function applications,
+    sometimes a form needs to be handled specially.
+    This applies not only to Clojure special forms,
+    but the occasional macro as well.
+    For example, =pulley.cps= handles =binding= forms specially
+    because CPS code uses a different mechanism to pass the dynamic environment
+    than native Clojure does.
+
+    The =*special-form-handlers*= dynamic var provides hook
+    to identify handlers for these forms.
+    Since it is dynamic, the behaviour of the CPS compiler can be affected
+    by altering the compile-time dynamic environment.
+
+    When a form is translated, and its operator is a symbol,
+    the compiler performs the following checks.
+
+    1. If =*special-form-handlers*= contains an entry for the symbol,
+       then the form is passed to the associated function.
+       This should be used to handle Clojure special forms,
+       since special form symbols do not resolve to a =Var=.
+    2. If the symbol resolves to a =Var= contained in =*special-form-handlers*=,
+       then the form is passed to the associated function.
+       This should be used to provide special handling of a Clojure macro.
+
+    So the keys of =*special-form-handlers*=
+    are either symbols (for special forms) or =Vars= (for everything else).
+    The values are functions that handle the form.
+    In addition to the input form itself, the handler functions take a number
+    of additional arguments.
+    See the docstring for =*special-form-handlers*= for details.
+* Contributing
+  We sincerely hope you enjoy using =pulley.cps=
+  and are able to use it to your advantage.
+  If you should find it lacking in some area,
+  we hope you will consider contributing in one of the following ways:
+  * Reporting bugs — If you think you've found a bug,
+    don't hesitate to open an issue on Github.
+  * Requesting new features — We won't know what you want unless you tell us.
+    If you see we are lacking a feature you would like,
+    please feel free to open an issue on Github
+    or open a discussion on an appropriate channel.
+  * Contributing code — As always, pull requests and patches are welcome.
+    However, before investing a large portion of you time
+    fixing a bug or implementing a new feature,
+    you may wish to drop us a line so we can coordinate our efforts.
