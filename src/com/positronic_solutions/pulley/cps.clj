@@ -739,91 +739,6 @@ Otherwise, the resulting form will evaluate direcly to the function."
                     ~expr)))))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; Exception Handling ;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(def ^:dynamic *exception-handler*
-  nil)
-
-(def primitive-raise
-  (fn->callable (fn [cont env ex]
-                  (throw ex))))
-
-(def raise
-  (cps-fn [ex]
-    (if-let [handler *exception-handler*]
-      (handler ex)
-      (primitive-raise ex))))
-
-(defmacro with-exception-handler
-  "Executes body in a context with f installed
-as the exception handler function."
-  ;; TODO: Implement this in a CPS-agnostic manner.
-  ;;       That is, if we aren't in the CPS compiler,
-  ;;       convert this to the try-catch block.
-  ([f & body]
-     `(binding [*exception-handler* ~f]
-        ~@body)))
-
-(defmacro handler-case
-  "Executes protected in an environment with the specified exception-handlers
-installed as exception handlers.
-If protected exits normally, handler-case returns its value.
-Otherwise (if protected throws an exception),
-the first exception-handler that matches the thrown exception type
-will be invoked.
-If no matching handler is found, the exception is re-thrown.
-
-exception-handlers => exception-handler*
-
-exception-handler => (exception-type [name] & handler-body)
-* exception-type - Type of exception to be handled by this case.
-                   An exception will match this case if it is of this type
-                   or a sub-type of this type.
-* name - Name (variable) to which the thrown exception will be bound.
-* handler-body - sequence of expressions to be evaluated
-                 when a matching exception is thrown."
-  ([protected & exception-handlers]
-     (let [cc (gensym "cc_")
-           ex (gensym "ex_")]
-       `(let-cc [~cc]
-          (with-exception-handler
-            (fn [~ex]
-              (~cc (cond ~@(mapcat (fn [[ex-t [ex-v] & body]]
-                                    [`(instance? ~ex-t ~ex)
-                                     `(let [~ex-v ~ex]
-                                        ~@body)])
-                                  exception-handlers)
-                        :else (throw ~ex))))
-            ~protected)))))
-
-(defmacro unwind-protect
-  ([protected & cleanup]
-     (let [cleanup-thunk (gensym "cleanup-thunk_")
-           ex (gensym "ex_")
-           result (gensym "value_")]
-       `(let [~cleanup-thunk (fn []
-                               ~@cleanup)
-              ~result (with-exception-handler (fn [~ex]
-                                                (~cleanup-thunk)
-                                                (throw ~ex))
-                        ~protected)]
-          (~cleanup-thunk)
-          ~result))))
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;; Runtime Library ;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;
-
-
-(def call-cc
-  (cps-fn [f]
-    (let-cc [cc]
-      (f cc))))
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; Helper macros for generating CPS overrides of native functions ;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -936,3 +851,88 @@ thus effectively preventing the function from being called from a CPS context."
 ;; Forbid pop-thread-bindings
 (forbid-fn! pop-thread-bindings
             "push-thread-bindings/pop-thread-bindings can not be used in CPS code.  Use a higher-level construct, such as with-bindings, instead.")
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Exception Handling ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def ^:dynamic *exception-handler*
+  nil)
+
+(def primitive-raise
+  (fn->callable (fn [cont env ex]
+                  (throw ex))))
+
+(def raise
+  (cps-fn [ex]
+    (if-let [handler *exception-handler*]
+      (handler ex)
+      (primitive-raise ex))))
+
+(defmacro with-exception-handler
+  "Executes body in a context with f installed
+as the exception handler function."
+  ;; TODO: Implement this in a CPS-agnostic manner.
+  ;;       That is, if we aren't in the CPS compiler,
+  ;;       convert this to the try-catch block.
+  ([f & body]
+     `(binding [*exception-handler* ~f]
+        ~@body)))
+
+(defmacro handler-case
+  "Executes protected in an environment with the specified exception-handlers
+installed as exception handlers.
+If protected exits normally, handler-case returns its value.
+Otherwise (if protected throws an exception),
+the first exception-handler that matches the thrown exception type
+will be invoked.
+If no matching handler is found, the exception is re-thrown.
+
+exception-handlers => exception-handler*
+
+exception-handler => (exception-type [name] & handler-body)
+* exception-type - Type of exception to be handled by this case.
+                   An exception will match this case if it is of this type
+                   or a sub-type of this type.
+* name - Name (variable) to which the thrown exception will be bound.
+* handler-body - sequence of expressions to be evaluated
+                 when a matching exception is thrown."
+  ([protected & exception-handlers]
+     (let [cc (gensym "cc_")
+           ex (gensym "ex_")]
+       `(let-cc [~cc]
+          (with-exception-handler
+            (fn [~ex]
+              (~cc (cond ~@(mapcat (fn [[ex-t [ex-v] & body]]
+                                    [`(instance? ~ex-t ~ex)
+                                     `(let [~ex-v ~ex]
+                                        ~@body)])
+                                  exception-handlers)
+                        :else (throw ~ex))))
+            ~protected)))))
+
+(defmacro unwind-protect
+  ([protected & cleanup]
+     (let [cleanup-thunk (gensym "cleanup-thunk_")
+           ex (gensym "ex_")
+           result (gensym "value_")]
+       `(let [~cleanup-thunk (fn []
+                               ~@cleanup)
+              ~result (with-exception-handler (fn [~ex]
+                                                (~cleanup-thunk)
+                                                (throw ~ex))
+                        ~protected)]
+          (~cleanup-thunk)
+          ~result))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; Runtime Library ;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+(def call-cc
+  (cps-fn [f]
+    (let-cc [cc]
+      (f cc))))
