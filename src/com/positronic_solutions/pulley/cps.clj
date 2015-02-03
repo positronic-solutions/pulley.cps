@@ -856,12 +856,11 @@ environment active in the thread at the time $bound-fn* was called
 and then call f with any given arguments.
 
 This is basically an \"enhanced\" version of clojure.core/bound-fn*."
-  ;; TODO:  Figure out a way to implement this as an overriden fn.
   (cps-fn [f]
           (let [env (get-dynamic-env)]
+            ;; TODO:  Figure out a way to implement this as an overridden fn.
             (fn [& args]
-              (with-dynamic-env env
-                (apply f args))))))
+              (apply with-dynamic-env* env f args)))))
 
 (defmacro $bound-fn
   "Returns a function defined by the given fn-tail that, when called,
