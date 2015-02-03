@@ -839,7 +839,6 @@ The function is then called with that environment activated."
        (apply f args))))
 
 (override-fn* with-dynamic-env*
-  ;; TODO:  Figure out a way to implement this as an overriden fn.
   (fn->callable (fn [cont _env env-arg f & args]
                   (apply call f cont env-arg args))))
 
@@ -857,6 +856,7 @@ environment active in the thread at the time $bound-fn* was called
 and then call f with any given arguments.
 
 This is basically an \"enhanced\" version of clojure.core/bound-fn*."
+  ;; TODO:  Figure out a way to implement this as an overriden fn.
   (cps-fn [f]
           (let [env (get-dynamic-env)]
             (fn [& args]
