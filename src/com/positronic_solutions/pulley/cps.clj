@@ -817,6 +817,62 @@ thus effectively preventing the function from being called from a CPS context."
             "push-thread-bindings/pop-thread-bindings can not be used in CPS code.  Use a higher-level construct, such as with-bindings, instead.")
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Dynamic Environment ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn get-dynamic-env
+  "Returns an opaque representation of the current thread's dynamic bindings"
+  ([]
+     (clojure.lang.Var/cloneThreadBindingFrame)))
+
+(override-fn* get-dynamic-env
+  (fn->callable (fn [cont env]
+                  (cont env))))
+
+(defn with-dynamic-env*
+  "Takes an opaque dynamic environment (á la get-dynamic-env)
+and a function of no arguments.
+The function is then called with that environment activated."
+  ([env f & args]
+     (with-thread-binding-frame env
+       (apply f args))))
+
+(override-fn* with-dynamic-env*
+  ;; TODO:  Figure out a way to implement this as an overriden fn.
+  (fn->callable (fn [cont _env env-arg f & args]
+                  (apply call f cont env-arg args))))
+
+(defmacro with-dynamic-env
+  "Takes an opague dynamic environment (á la get-dynamic-env).
+The body is then executed with that environment activated."
+  ([env & body]
+     `(with-dynamic-env* ~env
+        (fn []
+          ~@body))))
+
+(def $bound-fn*
+  "Returns a function which, when called, will install the same dynamic
+environment active in the thread at the time $bound-fn* was called
+and then call f with any given arguments.
+
+This is basically an \"enhanced\" version of clojure.core/bound-fn*."
+  (cps-fn [f]
+          (let [env (get-dynamic-env)]
+            (fn [& args]
+              (with-dynamic-env env
+                (apply f args))))))
+
+(defmacro $bound-fn
+  "Returns a function defined by the given fn-tail that, when called,
+will activate the same dynamic environment active in the thread
+at the time $bound-fn was called.
+
+This is basically an \"enhanced\" version of clojure.core/bound-fn."
+  ([& fn-tail]
+     `($bound-fn* (fn ~@fn-tail))))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; Runtime Library ;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;

@@ -319,6 +319,35 @@ to ensure they are equivalent."
                  (cps (pop-thread-bindings 1 2 3))))))
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Dynamic environment tests ($bound-fn, etc.) ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(deftest test-$bound-fn
+  (without-recursive-trampolines
+   (testing "$bound-fn* effectively captures root binding"
+     (with-strict-cps
+       (is (= [0 10]
+              (cps (let [f ($bound-fn [] *foo*)]
+                     (binding [*foo* 10]
+                       [(f) *foo*]))))))
+     ;; Note:  This fails with strict-cps because the non-cps
+     ;;        version fails ($bound-fn* returns a cps-fn).
+     (verify-form-equiv (let [f ($bound-fn* (fn [] *foo*))]
+                          (binding [*foo* 10]
+                            (f)))))
+   (testing "$bound-fn captures dynamic bindings"
+     (with-strict-cps
+       (is (= 10
+              (cps ((binding [*foo* 10]
+                      ($bound-fn [] *foo*)))))))
+     ;; Note:  Again, this fails with strict-cps
+     ;;        because the current implementation
+     ;;        of $bound-fn* returns a cps-fn.
+     (verify-form-equiv ((binding [*foo* 10]
+                           ($bound-fn [] *foo*)))))))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; Tests for select core functions ;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
