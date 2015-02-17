@@ -253,8 +253,7 @@ to ensure they are equivalent."
                           10
                           (catch Throwable ex
                        ex))))
-   ;; TODO: Execute handler with proper dynamic environment
-   #_(let [;; work around unimplemented new
+   (let [;; work around unimplemented new
          exception (new RuntimeException "test")]
      (is (thrown-with-msg? RuntimeException #"test"
                            (cps (try

@@ -886,7 +886,7 @@ as the exception handler function."
   ;;       That is, if we aren't in the CPS compiler,
   ;;       convert this to the try-catch block.
   ([f & body]
-     `(binding [*exception-handler* ~f]
+     `(binding [*exception-handler* ($bound-fn* ~f)]
         ~@body)))
 
 (defmacro handler-case
