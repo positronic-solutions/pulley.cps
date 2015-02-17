@@ -74,6 +74,12 @@ to ensure they are equivalent."
 
 (deftest test-collections
   (without-recursive-trampolines
+   (testing "Empty collection literals"
+     (with-strict-cps
+       (verify-form-equiv [])
+       (verify-form-equiv #{})
+       (verify-form-equiv {})
+       (verify-form-equiv ())))
    (testing "Simple collection literals"
      (with-strict-cps
        (verify-form-equiv [1 2 3])

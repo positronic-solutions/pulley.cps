@@ -357,8 +357,12 @@ not a form representing a function."
                    ~(seq coll)
                    ~(fn [vars]
                       (if-let [empty-coll (empty coll)]
-                        `(~cont (conj ~(empty coll)
-                                      ~@vars))
+                        (if (empty? vars)
+                          ;; then (we're done)
+                          empty-coll
+                          ;; else (conj the vars)
+                          `(~cont (conj ~empty-coll
+                                        ~@vars)))
                         (throw (new IllegalStateException
                                     (str "Conversion of literal "
                                          (print-str (type coll))
@@ -406,6 +410,9 @@ Parameters:
   cont - this form's continuation form
   f - the form of the function to be called
   args - the forms of the function arguments"
+  ([cont env]
+     ;; handle empty list
+     '())
   ([cont env f & args]
      (let [value (gensym "value_")]
        `(cps-expr (fn [~value]
