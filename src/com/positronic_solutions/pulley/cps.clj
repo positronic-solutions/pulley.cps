@@ -49,19 +49,27 @@ Default: false"
 (defprotocol ICallable
   (with-continuation [callable cont env]))
 
+(defmacro with-thread-binding-frame [frame & body]
+  (let [original-frame (gensym "frame_")]
+    `(let [~original-frame (clojure.lang.Var/getThreadBindingFrame)]
+       (try
+         (clojure.lang.Var/resetThreadBindingFrame ~frame)
+         ~@body
+         (finally (clojure.lang.Var/resetThreadBindingFrame ~original-frame))))))
+
 (extend-protocol ICallable
   clojure.lang.IFn
   (with-continuation [f cont env]
     (fn [& args]
-      #_(println "Calling native fn: " f args)
-      (when *strict-cps*
-        (throw (new IllegalStateException
-                    (str "Attempt to call non-CPS routine "
-                         f
-                         " while *strict-cps* is set."))))
-      (let [value (with-bindings env
-                    (apply f args))]
-        (cont value)))))
+      #_(println "Calling native fn: " f args env)
+      (with-thread-binding-frame env
+        #_(println "Thread Bindings: " (get-thread-bindings))
+        (when *strict-cps*
+          (throw (new IllegalStateException
+                      (str "Attempt to call non-CPS routine "
+                           f
+                           " while *strict-cps* is set."))))
+        (cont (apply f args))))))
 
 (defn call [f cont env & args]
   #_(println "call: continuation is " cont)
@@ -76,14 +84,13 @@ Default: false"
      (if (or *allow-recursive-trampolines*
              (= *trampoline-depth* 0))
        (binding [*trampoline-depth* (inc *trampoline-depth*)]
-         ;; TODO: should we pass the current thread bindings
-         ;;       as the initial dynamic enviroment,
-         ;;       rather than an empty map?
-         ;;       (unfortunately, that is pretty detrimental to performance)
-         (loop [value (apply call f identity {} args)]
-           (if (satisfies? IThunk value)
-             (recur (invoke-thunk value))
-             value)))
+         (let [current-frame (clojure.lang.Var/getThreadBindingFrame)
+               initial-frame (clojure.lang.Var/cloneThreadBindingFrame)]
+           (with-thread-binding-frame current-frame
+             (loop [value (apply call f identity initial-frame args)]
+               (if (satisfies? IThunk value)
+                 (recur (invoke-thunk value))
+                 value)))))
        (throw (new IllegalStateException "Attempt to invoke recursive trampoline, but *allow-recursive-trampolines* does not allow it.")))))
 
 (defmacro thunk [& body]
@@ -377,13 +384,9 @@ not a form representing a function."
     ;; then (symbol resolves to a var => see if it's dynamic)
     (if (dynamic? resolved)
       ;; then (dynamic => do dynamic lookup against env)
-      (let [k (gensym "key_")
-            v (gensym "value_")]
-        `(~cont (if-let [[~k ~v] (find ~env ~resolved)]
-                  ;; then (binding was found in env => use its value)
-                  ~v
-                  ;; else (use the enclosing environment's value)
-                  ~name)))
+      `(do
+         (clojure.lang.Var/resetThreadBindingFrame ~env)
+         (~cont ~name))
       ;; else (not dynamic => just evaluate the symbol directly)
       `(~cont ~name))
     ;; else (local / unresolved => just evaluate the symbol directly)
@@ -476,18 +479,19 @@ Parameters:
              expr)
           ;; callback function
           ~(fn [values]
-             (let [new-env (gensym "env_")]
-               `(let [~new-env
-                      (-> ~env
-                          ~@(map (fn [[name _] value]
-                                   (let [binding-var (resolve name)]
-                                     (when (not (dynamic? binding-var))
-                                       (throw (new IllegalStateException
-                                                   (str "Can't dynamically bind non-dynamic var: "
-                                                        binding-var))))
-                                     `(assoc ~binding-var ~value)))
-                                 (partition-all 2 bindings)
-                                 values))]
+             (let [new-env (gensym "env_")
+                   bindings (->> (map (fn [[name _] value]
+                                        (let [binding-var (resolve name)]
+                                          (when (not (dynamic? binding-var))
+                                            (throw (new IllegalStateException
+                                                        (str "Can't dynamically bind non-dynamic var: "
+                                                             binding-var))))
+                                          [binding-var value]))
+                                      (partition-all 2 bindings)
+                                      values)
+                                 (into {}))]
+               `(let [~new-env (with-bindings ~bindings
+                                 (clojure.lang.Var/cloneThreadBindingFrame))]
                   (cps-do ~cont ~new-env
                           ~@body))))))))
 
@@ -743,6 +747,17 @@ Otherwise, the resulting form will evaluate direcly to the function."
 ;;;; Helper macros for generating CPS overrides of native functions ;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defmacro override-fn*
+  "Version of override-fn that accepts an ICallable object,
+rather than a function form."
+  ([name callable]
+     (let [f (gensym)]
+       `(let [~f ~callable]
+          (extend-type (type ~name)
+            ICallable
+            (with-continuation [~'self ~'cont ~'env]
+              (with-continuation ~f ~'cont ~'env)))))))
+
 (defmacro override-fn
   "Used to provide a CPS-transformed version of an existing native function.
 
@@ -760,12 +775,7 @@ fn-tails are function parameter list(s) and body(ies),
 as would be used in a fn or cps-fn form.
 These are enclosed in a cps-fn form and sent through the CPS compiler."
   ([name & fn-tails]
-     (let [f (gensym "f_")]
-       `(let [~f (cps-fn ~@fn-tails)]
-          (extend-type (type ~name)
-            ICallable
-            (with-continuation [~'self ~'cont ~'env]
-              (with-continuation ~f ~'cont ~'env)))))))
+     `(override-fn* ~name (cps-fn ~@fn-tails))))
 
 (defmacro auto-override-fn
   "Attempts to automatically generate a CPS override for a function
@@ -830,19 +840,18 @@ thus effectively preventing the function from being called from a CPS context."
   ICallable
   (with-continuation [self cont env]
     (fn []
-      (cont (merge (get-thread-bindings)
-                   env)))))
+      (with-thread-binding-frame env
+        (cont (get-thread-bindings))))))
 
 ;; CPS override of with-bindings*
 (extend-type (type with-bindings*)
   ICallable
   (with-continuation [self cont env]
     (fn [binding-map f & args]
-      (let [full-env (merge-with (fn [a b]
-                                   b)
-                                 env
-                                 binding-map)]
-        (thunk (apply call f cont full-env args))))))
+      (let [extended-env (with-thread-binding-frame env
+                           (push-thread-bindings binding-map)
+                           (clojure.lang.Var/cloneThreadBindingFrame))]
+        (apply call f cont extended-env args)))))
 
 ;; Forbid push-thread-bindings
 (forbid-fn! push-thread-bindings
@@ -927,10 +936,64 @@ exception-handler => (exception-type [name] & handler-body)
           ~result))))
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Dynamic Environment ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn get-dynamic-env
+  "Returns an opaque representation of the current thread's dynamic bindings"
+  ([]
+     (clojure.lang.Var/cloneThreadBindingFrame)))
+
+(override-fn* get-dynamic-env
+  (fn->callable (fn [cont env]
+                  (cont env))))
+
+(defn with-dynamic-env*
+  "Takes an opaque dynamic environment (á la get-dynamic-env)
+and a function of no arguments.
+The function is then called with that environment activated."
+  ([env f & args]
+     (with-thread-binding-frame env
+       (apply f args))))
+
+(override-fn* with-dynamic-env*
+  (fn->callable (fn [cont _env env-arg f & args]
+                  (apply call f cont env-arg args))))
+
+(defmacro with-dynamic-env
+  "Takes an opague dynamic environment (á la get-dynamic-env).
+The body is then executed with that environment activated."
+  ([env & body]
+     `(with-dynamic-env* ~env
+        (fn []
+          ~@body))))
+
+(def $bound-fn*
+  "Returns a function which, when called, will install the same dynamic
+environment active in the thread at the time $bound-fn* was called
+and then call f with any given arguments.
+
+This is basically an \"enhanced\" version of clojure.core/bound-fn*."
+  (cps-fn [f]
+          (let [env (get-dynamic-env)]
+            ;; TODO:  Figure out a way to implement this as an overridden fn.
+            (fn [& args]
+              (apply with-dynamic-env* env f args)))))
+
+(defmacro $bound-fn
+  "Returns a function defined by the given fn-tail that, when called,
+will activate the same dynamic environment active in the thread
+at the time $bound-fn was called.
+
+This is basically an \"enhanced\" version of clojure.core/bound-fn."
+  ([& fn-tail]
+     `($bound-fn* (fn ~@fn-tail))))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; Runtime Library ;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;
-
 
 (def call-cc
   (cps-fn [f]

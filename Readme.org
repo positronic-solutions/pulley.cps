@@ -299,7 +299,7 @@
 
     A continuation is simply an =IFn= that takes a single argument —
     the result of the previous computation.
-    A dynamic environment is an =IPersistentMap= mapping =Vars= to values.
+    A dynamic environment is a =clojure.lang.Var$Frame= object.
 
     The =call= function provides a convenient way to call an =ICallable=.
     If you need to manually transform some code,
