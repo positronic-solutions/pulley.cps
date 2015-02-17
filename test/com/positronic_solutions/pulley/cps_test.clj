@@ -298,14 +298,12 @@ to ensure they are equivalent."
   (without-recursive-trampolines
    (with-strict-cps
      (with-bindings {#'*foo* 10}
-       (verify-form-equiv *foo*)))
-   ;; TODO: evaluate these with-strict-cps
-   ;;       once collection literals are implemented
-   (verify-form-equiv (with-bindings* (hash-map #'*foo* 10)
-                        (fn []
-                          *foo*)))
-   (verify-form-equiv (with-bindings (hash-map #'*foo* 10)
-                        *foo*))))
+       (verify-form-equiv *foo*))
+     (verify-form-equiv (with-bindings* {#'*foo* 10}
+                          (fn []
+                            *foo*)))
+     (verify-form-equiv (with-bindings {#'*foo* 10}
+                          *foo*)))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
