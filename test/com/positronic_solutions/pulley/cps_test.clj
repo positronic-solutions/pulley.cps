@@ -121,7 +121,13 @@ to ensure they are equivalent."
   (without-recursive-trampolines
    (with-strict-cps
      (verify-form-equiv ((fn [] 10)))
-     (verify-form-equiv ((fn [x] x) 10)))
+     (verify-form-equiv ((fn [x] x) 10))
+     (verify-form-equiv (let [f (fn f
+                                  ([]
+                                     (f 10))
+                                  ([x]
+                                     x))]
+                          (f))))
    (verify-form-equiv ((fn [x y]
                          (+ x y))
                        1 2))
@@ -130,7 +136,15 @@ to ensure they are equivalent."
                        10 11 12 13)))
   (verify-form-equiv (apply (fn [& xs]
                               (reduce * xs))
-                            (range 1 10))))
+                            (range 1 10)))
+  (verify-form-equiv (let [f (fn f [coll x]
+                               (if (empty? coll)
+                                 false
+                                 (if (= x (first coll))
+                                   true
+                                   (f (rest coll) x))))
+                           v [1 2 3]]
+                       [(f v 3)])))
 
 (deftest test-if
   (without-recursive-trampolines
