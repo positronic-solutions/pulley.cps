@@ -369,8 +369,12 @@ not a form representing a function."
                    ~(seq coll)
                    ~(fn [vars]
                       (if-let [empty-coll (empty coll)]
-                        `(~cont (conj ~(empty coll)
-                                      ~@vars))
+                        (if (empty? vars)
+                          ;; then (we're done)
+                          empty-coll
+                          ;; else (conj the vars)
+                          `(~cont (conj ~empty-coll
+                                        ~@vars)))
                         (throw (new IllegalStateException
                                     (str "Conversion of literal "
                                          (print-str (type coll))
@@ -418,6 +422,9 @@ Parameters:
   cont - this form's continuation form
   f - the form of the function to be called
   args - the forms of the function arguments"
+  ([cont env]
+     ;; handle empty list
+     '())
   ([cont env f & args]
      (let [value (gensym "value_")]
        `(cps-expr (fn [~value]
@@ -557,40 +564,45 @@ If cont is not nil, it will be called with the resulting function.
 Otherwise, the resulting form will evaluate direcly to the function."
   ([cont env & bodies]
      (let [return (gensym)
-           env (gensym "env_")]
-       ;; f = constructed function
-       (let [f `(fn->callable (fn ~@(for [spec bodies
-                                          ;; Keeping the symbol
-                                          ;; for a function (if any)
-                                          ;; is interfering with
-                                          ;; the current implementation
-                                          ;; of letfn* (it introduces
-                                          ;; a binding for the symbol?),
-                                          ;; so just filter out symbols
-                                          ;; for now.
-                                          :when (not (symbol? spec))]
-                                      ;; This should never be true,
-                                      ;; since we filter out symbols
-                                      ;; in the :when clause,
-                                      ;; but I'm keeping it around
-                                      ;; because ideally, we want
-                                      ;; to keep meaningful function names.
-                                      ;; Maybe we should convert symbols
-                                      ;; to (gensym (name spec))?
-                                      (if (symbol? spec)
-                                        spec
-                                        (let [[params & body] spec]
-                                          #_(println "fn: " params body)
-                                          `(~(into []
-                                                   (concat [return env]
-                                                           params))
-                                            (cps-do ~return ~env
-                                                    ~@body)))))))]
-         (if cont
-           ;; then (continuation provided -> pass f to continuation)
-           `(~cont ~f)
-           ;; else (continuation not provided -> return f directory)
-           f)))))
+           env (gensym "env_")
+           [name bodies] (if (symbol? (first bodies)) ;; Capture name (if given)
+                           [(first bodies) (rest bodies)]
+                           [nil bodies])
+           name' (when name ;; Generate alias for low-level function
+                   (gensym (str name "_")))
+           ;; f = constructed function
+           f `(fn->callable (fn ~@(when name ;; Named? -> inject alias
+                                    [name'])
+                              ~@(for [spec bodies]
+                                  ;; This should never be true,
+                                  ;; since we filter out symbols
+                                  ;; in the :when clause,
+                                  ;; but I'm keeping it around
+                                  ;; because ideally, we want
+                                  ;; to keep meaningful function names.
+                                  ;; Maybe we should convert symbols
+                                  ;; to (gensym (name spec))?
+                                  (if (symbol? spec)
+                                    spec
+                                    (let [[params & body] spec]
+                                      #_(println "fn: " params body)
+                                      `(~(into []
+                                               (concat [return env]
+                                                       params))
+                                        ~(cond-> `(cps-do ~return ~env
+                                                          ~@body)
+                                                 name ((fn [body]
+                                                         (let [cont (gensym "cont_")
+                                                               env (gensym "env_")
+                                                               args (gensym "args_")]
+                                                           `(let [~name (fn->callable (fn [~cont ~env & ~args]
+                                                                                        (apply ~name' ~cont ~env ~args)))]
+                                                              ~body)))))))))))]
+       (if cont
+         ;; then (continuation provided -> pass f to continuation)
+         `(~cont ~f)
+         ;; else (continuation not provided -> return f directly)
+         f))))
 
 (defmacro cps-if
   ([cont env test then]
