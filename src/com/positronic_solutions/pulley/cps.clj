@@ -83,10 +83,7 @@ Default: false"
                                  f
                                  " while *strict-cps* is set."))))
           ;; else (invoke the function)
-          (try
-            (cont (apply f args))
-            (catch Throwable ex
-              (thunk (call raise cont env ex)))))))))
+          (cont (apply f args)))))))
 
 (defn call [f cont env & args]
   #_(println "call: continuation is " cont)
@@ -861,16 +858,12 @@ thus effectively preventing the function from being called from a CPS context."
   ICallable
   (with-continuation [self cont env]
     (fn [f & args]
-      ;; TODO: handle exceptions
       (apply call f cont env (apply list* args)))))
 
 ;; CPS override of instance?
 (override-fn* instance?
               (fn->callable (fn [cont env class obj]
-                              (try
-                                (cont (instance? class obj))
-                                (catch Throwable ex
-                                  (call raise cont env ex))))))
+                              (cont (instance? class obj)))))
 
 ;; CPS override of get-thread-bindings
 (extend-type (type get-thread-bindings)
