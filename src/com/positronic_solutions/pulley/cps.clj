@@ -18,6 +18,8 @@
 (ns com.positronic-solutions.pulley.cps
   (:require [clojure.repl :as repl]))
 
+(declare default-exception-handler)
+
 (def ^:dynamic *trampoline-depth*
   "Records the number of trampolines active on the current stack."
   0)
@@ -878,8 +880,16 @@ thus effectively preventing the function from being called from a CPS context."
 ;;; Exception Handling ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn default-exception-handler
+  ([ex]
+     (throw ex)))
+
+(override-fn* default-exception-handler
+              (fn->callable (fn [cont env ex]
+                              (throw ex))))
+
 (def ^:dynamic *exception-handler*
-  nil)
+  default-exception-handler)
 
 (def primitive-raise
   (fn->callable (fn [cont env ex]
@@ -887,9 +897,7 @@ thus effectively preventing the function from being called from a CPS context."
 
 (def raise
   (cps-fn [ex]
-    (if-let [handler *exception-handler*]
-      (handler ex)
-      (primitive-raise ex))))
+    (*exception-handler* ex)))
 
 (defmacro with-exception-handler
   "Executes body in a context with f installed
