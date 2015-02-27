@@ -292,7 +292,24 @@ to ensure they are equivalent."
                                   (finally (reset! a 20)
                                            (reset! b 30)))
                                 (deref a)
-                                (deref b))))))
+                                (deref b)))))
+  (testing "Nested trampolines"
+    (letfn [(foo []
+              (try
+                (cps (try
+                       (throw (new Exception))
+                       (catch Exception ex
+                         (throw (new IllegalStateException)))))
+                (catch IllegalStateException ex
+                  (throw (new NullPointerException "Hello")))))]
+      (try
+        (foo)
+        (catch NullPointerException ex
+          (type ex)))
+      (verify-form-equiv (try
+                           (foo)
+                           (catch NullPointerException ex
+                             (type ex)))))))
 
 (deftest test-var-form
   (without-recursive-trampolines

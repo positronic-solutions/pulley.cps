@@ -18,6 +18,7 @@
 (ns com.positronic-solutions.pulley.cps
   (:require [clojure.repl :as repl]))
 
+(declare ^:dynamic *exception-handler*)
 (declare default-exception-handler)
 
 (def ^:dynamic *trampoline-depth*
@@ -71,7 +72,10 @@ Default: false"
                       (str "Attempt to call non-CPS routine "
                            f
                            " while *strict-cps* is set."))))
-        (cont (apply f args))))))
+        (try
+          (cont (apply f args))
+          (catch Throwable ex
+            (*exception-handler* ex)))))))
 
 (defn call [f cont env & args]
   #_(println "call: continuation is " cont)
@@ -85,7 +89,8 @@ Default: false"
   ([f & args]
      (if (or *allow-recursive-trampolines*
              (= *trampoline-depth* 0))
-       (binding [*trampoline-depth* (inc *trampoline-depth*)]
+       (binding [*trampoline-depth* (inc *trampoline-depth*)
+                 *exception-handler* default-exception-handler]
          (let [current-frame (clojure.lang.Var/getThreadBindingFrame)
                initial-frame (clojure.lang.Var/cloneThreadBindingFrame)]
            (with-thread-binding-frame current-frame
