@@ -86,7 +86,7 @@ Default: false"
           (try
             (cont (apply f args))
             (catch Throwable ex
-              (*exception-handler* ex))))))))
+              (thunk (call raise cont env ex)))))))))
 
 (defn call [f cont env & args]
   #_(println "call: continuation is " cont)
