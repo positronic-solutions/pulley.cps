@@ -366,6 +366,25 @@ to ensure they are equivalent."
                                        x)]
                           (let-cc 4))))))
 
+(deftest test-with-strict-cps
+  (without-recursive-trampolines
+   (with-strict-cps
+     (testing "Happy case"
+       (verify-form-equiv 1)
+       (verify-form-equiv (apply (fn [x y]
+                                   [x y])
+                                 '(1 2))))
+     (testing "Exceptional case"
+       (is (thrown? IllegalStateException
+                    (cps (new NullPointerException)))))
+     (testing "Catch exception within CPS context"
+       (let [foo (fn [] :a)]
+         (is (= :a (foo)))
+         (is (= :b (cps (try
+                          (foo)
+                          (catch IllegalStateException ex
+                            :b))))))))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; Test CPS overrides of select core functions ;;;;

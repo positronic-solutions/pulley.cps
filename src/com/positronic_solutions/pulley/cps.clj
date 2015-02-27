@@ -18,6 +18,7 @@
 (ns com.positronic-solutions.pulley.cps
   (:require [clojure.repl :as repl]))
 
+(declare call)
 (declare ^:dynamic *exception-handler*)
 (declare default-exception-handler)
 (declare raise)
@@ -50,6 +51,11 @@ Default: false"
 (defprotocol IThunk
   (invoke-thunk [thunk]))
 
+(defmacro thunk [& body]
+  `(reify IThunk
+     (invoke-thunk [self]
+       ~@body)))
+
 (defprotocol ICallable
   (with-continuation [callable cont env]))
 
@@ -68,15 +74,19 @@ Default: false"
       #_(println "Calling native fn: " f args env)
       (with-thread-binding-frame env
         #_(println "Thread Bindings: " (get-thread-bindings))
-        (when *strict-cps*
-          (throw (new IllegalStateException
-                      (str "Attempt to call non-CPS routine "
-                           f
-                           " while *strict-cps* is set."))))
-        (try
-          (cont (apply f args))
-          (catch Throwable ex
-            (*exception-handler* ex)))))))
+        (if *strict-cps*
+          ;; then (raise exception)
+          (thunk (call raise
+                       cont env
+                       (new IllegalStateException
+                            (str "Attempt to call non-CPS routine "
+                                 f
+                                 " while *strict-cps* is set."))))
+          ;; else (invoke the function)
+          (try
+            (cont (apply f args))
+            (catch Throwable ex
+              (*exception-handler* ex))))))))
 
 (defn call [f cont env & args]
   #_(println "call: continuation is " cont)
@@ -100,11 +110,6 @@ Default: false"
                  (recur (invoke-thunk value))
                  value)))))
        (throw (new IllegalStateException "Attempt to invoke recursive trampoline, but *allow-recursive-trampolines* does not allow it.")))))
-
-(defmacro thunk [& body]
-  `(reify IThunk
-     (invoke-thunk [self]
-       ~@body)))
 
 (defn fn->callable
   "Reifies f to implement both ICallable and IFn.
