@@ -438,6 +438,41 @@ to ensure they are equivalent."
                  (cps (pop-thread-bindings 1 2 3))))))
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Exception Handling tests ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(deftest test-call-non-callable
+  (without-recursive-trampolines
+   (with-strict-cps
+     (let [expected-message "No implementation of method: :with-continuation of protocol: #'com.positronic-solutions.pulley.cps/ICallable found for class: java.lang.Long"
+           check-exception-message (fn->callable
+                                    (fn [cont env ex expected-message]
+                                      (let [actual-message (. ex (getMessage))]
+                                        (-> (assert (= expected-message
+                                                       actual-message)
+                                                    (str "Unexpected message: "
+                                                         actual-message))
+                                            (cont)))))]
+       (testing "Unhandled Exception"
+         ;; TODO: document this difference
+         (is (thrown? ClassCastException
+                      "java.lang.Long cannot be case to clojure.lang.IFn"
+                      (1 1)))
+         (is (thrown? IllegalArgumentException
+                      expected-message
+                      (cps (1 1)))))
+       (testing "Catch exception in CPS context"
+         (verify-form-equiv (try
+                              (1 1)
+                              ;; For non-cps version
+                              (catch ClassCastException ex
+                                (check-exception-message ex "java.lang.Long cannot be cast to clojure.lang.IFn"))
+                              ;; For cps version
+                              (catch IllegalArgumentException ex
+                                (check-exception-message ex expected-message)))))))))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Dynamic environment tests ($bound-fn, etc.) ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

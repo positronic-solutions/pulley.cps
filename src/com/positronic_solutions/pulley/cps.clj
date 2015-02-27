@@ -93,7 +93,10 @@ Default: false"
   #_(println "call: env is " env)
   #_(println "calling " f args)
   ;; TODO: thunk this (so we don't have to thunk it everywhere it's called)?
-  (apply (with-continuation f cont env) args))
+  (try
+    (apply (with-continuation f cont env) args)
+    (catch Throwable ex
+      (call raise cont env ex))))
 
 (defn trampoline
   "Runs f on a trampoline, and returns the resulting value."
@@ -906,7 +909,7 @@ thus effectively preventing the function from being called from a CPS context."
 
 (override-fn* default-exception-handler
               (fn->callable (fn [cont env ex]
-                              (throw ex))))
+                              (thunk (throw ex)))))
 
 (def ^:dynamic *exception-handler*
   default-exception-handler)
