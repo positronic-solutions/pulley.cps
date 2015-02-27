@@ -371,6 +371,25 @@ to ensure they are equivalent."
 ;;;; Test CPS overrides of select core functions ;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(deftest test-instance?
+  (without-recursive-trampolines
+   (with-strict-cps
+     (testing "Happy path"
+       (verify-form-equiv
+        (instance? Integer 1)))
+     (testing "Non-type for class parameter"
+       (is (thrown? ClassCastException
+                    (instance? 1 1)))
+       (is (thrown? ClassCastException
+                    (cps (instance? 1 1)))))
+     (testing "Catch exception within CPS context"
+       (let [exception-message (fn->callable (fn [cont env ex]
+                                               (. ex (getMessage))))]
+         (verify-form-equiv (try
+                              (instance? 1 1)
+                              (catch ClassCastException ex
+                                (exception-message ex)))))))))
+
 (deftest test-with-bindings
   (without-recursive-trampolines
    (with-strict-cps

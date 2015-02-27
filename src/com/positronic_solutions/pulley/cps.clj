@@ -20,6 +20,7 @@
 
 (declare ^:dynamic *exception-handler*)
 (declare default-exception-handler)
+(declare raise)
 
 (def ^:dynamic *trampoline-depth*
   "Records the number of trampolines active on the current stack."
@@ -852,7 +853,16 @@ thus effectively preventing the function from being called from a CPS context."
   ICallable
   (with-continuation [self cont env]
     (fn [f & args]
+      ;; TODO: handle exceptions
       (apply call f cont env (apply list* args)))))
+
+;; CPS override of instance?
+(override-fn* instance?
+              (fn->callable (fn [cont env class obj]
+                              (try
+                                (cont (instance? class obj))
+                                (catch Throwable ex
+                                  (call raise cont env ex))))))
 
 ;; CPS override of get-thread-bindings
 (extend-type (type get-thread-bindings)
