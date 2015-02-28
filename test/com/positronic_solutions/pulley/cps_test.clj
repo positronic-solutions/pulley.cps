@@ -478,6 +478,106 @@ to ensure they are equivalent."
                               (catch IllegalArgumentException ex
                                 (check-exception-message ex expected-message)))))))))
 
+(deftest test-with-exception-handler
+  (without-recursive-trampolines
+   (with-strict-cps
+     (testing "no exception"
+       (verify-form-equiv :test
+                          (with-exception-handler (fn [ex]
+                                                    :exception)
+                            :test)))
+     (testing "handle exception"
+       ;; TODO:  use verify-form-equiv once we have CPS-agnostic
+       ;;        with-exception-handler
+       (is (= :exception
+              (cps (with-exception-handler (fn [ex]
+                                             :exception)
+                     (1 1))))))
+     (testing "exception while handling exception"
+       (is (thrown? NullPointerException
+                    (cps (with-exception-handler (fn [ex]
+                                                   (instance? nil 1))
+                           (1 1))))))
+     (testing "non-callable handler"
+       (is (thrown-with-msg? IllegalArgumentException
+                             #"No implementation of method: :with-continuation of protocol: #'com.positronic-solutions.pulley.cps/ICallable found for class: nil"
+                             (cps (with-exception-handler nil
+                                    (instance? nil 1))))))
+     (testing "nested handlers"
+       (testing "handle exception in inner handler"
+         (is (= :inner-handler
+                (cps (with-exception-handler (fn [ex]
+                                               :outer-handler)
+                       (with-exception-handler (fn [ex]
+                                                 :inner-handler)
+                         (1 1)))))))
+       (testing "handle exception in outer handler"
+         (is (= :outer-handler
+                (cps (with-exception-handler (fn [ex]
+                                               :outer-handler)
+                       (1 (with-exception-handler (fn [ex]
+                                                    :inner-handler)
+                            :inner-value)))))))
+       (testing "exception rethrown by inner handler"
+         (is (= :outer-handler
+                (cps (with-exception-handler (fn [ex]
+                                               :outer-handler)
+                       (with-exception-handler (fn [ex]
+                                                (throw ex))
+                         (1 1)))))))
+       (testing "exception rethrown by both handlers"
+         (is (thrown? IllegalArgumentException
+                      (cps (with-exception-handler (fn [ex]
+                                                     (throw ex))
+                             (with-exception-handler (fn [ex]
+                                                       (throw ex))
+                               (1 1)))))))))
+   (testing "native function as exception handler"
+     (testing "handle exception"
+       (let [handler (fn [ex]
+                       :exception)]
+         (is (= :exception
+                (cps (with-exception-handler handler
+                       (1 1)))))))
+     (testing "exception while handling exception"
+       (let [handler (fn [ex]
+                       (apply nil []))]
+         (is (thrown? NullPointerException
+                      (cps (with-exception-handler handler
+                             (1 1)))))))
+     (testing "non-callable handler"
+       (is (thrown-with-msg? IllegalArgumentException
+                             #"No implementation of method: :with-continuation of protocol: #'com.positronic-solutions.pulley.cps/ICallable found for class: nil"
+                             (cps (with-exception-handler nil
+                                    (instance? nil 1))))))
+     (testing "nested handlers"
+       (let [outer-handler (fn [ex]
+                             :outer-handler)
+             inner-handler (fn [ex]
+                             :inner-handler)
+             rethrow-handler (fn [ex]
+                               (throw ex))]
+         (testing "handle exception in inner handler"
+           (is (= :inner-handler
+                  (cps (with-exception-handler outer-handler
+                         (with-exception-handler inner-handler
+                           (1 1)))))))
+         (testing "handle exception in outer handler"
+           (is (= :outer-handler
+                  (cps (with-exception-handler outer-handler
+                         (1 (with-exception-handler inner-handler
+                              :inner-value)))))))
+         (testing "exception rethrown by inner handler"
+           (is (= :outer-handler
+                  (cps (with-exception-handler outer-handler
+                         (with-exception-handler rethrow-handler
+                           (1 1)))))))
+         (testing "exception rethrown by both handlers"
+           (is (thrown? IllegalArgumentException
+                        (cps (with-exception-handler rethrow-handler
+                               (with-exception-handler rethrow-handler
+                                 (1 1))))))))))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Dynamic environment tests ($bound-fn, etc.) ;;;
