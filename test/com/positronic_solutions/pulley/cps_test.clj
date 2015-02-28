@@ -32,8 +32,14 @@ One will be passed through the CPS compiler, the other will not.
 Both forms will then be evaluated and the resulting values compared
 to ensure they are equivalent."
   ([form]
-     `(testing (with-out-str (pprint ~form))
+     `(testing ~(with-out-str (pprint form))
         (is (= ~form
+               (cps ~form)))))
+  ([expected-value form]
+     `(testing ~(with-out-str (pprint `(= ~expected-value
+                                          ~form)))
+        (is (= ~expected-value
+               ~form
                (cps ~form))))))
 
 (deftest test-atomic-expression
