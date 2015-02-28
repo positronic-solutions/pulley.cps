@@ -907,10 +907,6 @@ thus effectively preventing the function from being called from a CPS context."
 (def ^:dynamic *exception-handler*
   default-exception-handler)
 
-(def primitive-raise
-  (fn->callable (fn [cont env ex]
-                  (throw ex))))
-
 (def raise
   (cps-fn [ex]
     (*exception-handler* ex)))
