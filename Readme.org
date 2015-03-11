@@ -31,8 +31,9 @@
     the CPS compiler)
   * calls back and forth between native and CPS functions
   * function definitions (you can create a =fn=)
-  * special forms: =.= (dot), =def=, =do=, =fn*=, =if=,
-    =let*=, =letfn*=, =new=, =quote=, and =var=
+  * exception support (=throw=, =try=, etc.),
+  * special forms: =.= (dot), =catch=, =def=, =do=, =finally=, =fn*=, =if=,
+    =let*=, =letfn*=, =new=, =quote=, =throw=, =try=, and =var=
   * any and all macros that expand to transformable code
   * collection literals
 
@@ -45,9 +46,6 @@
     in constant space (including =binding= forms).
   * Continuations (with some caveats)
 ** Planned/Future Features
-   Support is being worked on for:
-   * exceptions (=throw=, =try=, =catch=, =finally=)
-
    The following are currently under consideration for future work:
    * Common Lisp-style restarts
    * A way to "escape" transformation
@@ -180,6 +178,31 @@
                            (odd (rest s))))))]
              (even inputs))))
      #+END_SRC
+** Exceptions
+   =pulley.cps= implements exceptions in a manner that is
+   semantically compatible with native Clojure/Java.
+   You can use =throw=, =try=, =catch=, etc. just like you normally would.
+   Unhandled exceptions cross CPS boundaries, as expected.
+
+   In addition, the following functions and macros are provided
+   and may be considered to be part of the public API:
+   * =raise= :: Functional equivalent of =throw=.
+   * =unwind-protect= :: Macro in the spirit
+        of the [[http://www.ai.mit.edu/projects/iiip/doc/CommonLISP/HyperSpec/Body/speope_unwind-protect.html][homonymous Common Lisp construct]].
+        Provides a slight short-hand for =(try ... (finally ...))= patterns.
+   * =handler-case= :: Macro in the spirit
+                       of the [[http://www.ai.mit.edu/projects/iiip/doc/CommonLISP/HyperSpec/Body/mac_handler-case.html][homonymous Common Lisp macro]].
+
+   Note that exception handling relies on an implicit stack
+   of exception handling functions.
+   In fact, =try= and friends will capture the current dynamic environment.
+   This means forms that introduce an exception handler
+   (=try=, =handler-case=, =unwind-protect=, etc.)
+   will consume heap space throughout their entire extent.
+   I.e., they are not tail-call optimizable.
+   This really isn't any different from Clojure/Java semantics
+   (other than the storage place is the heap rather than the hardware stack),
+   but it's something to bear in mind.
 ** Continuations
    =pulley.cps= supports "full" continuations with some caveats:
    * Within a particular CPS context, continuations can be considered
@@ -317,6 +340,33 @@
     that invokes the =IFn= on the native stack.
     This allows non-CPS functions to be invoked by CPS code
     without any special handling — it's all handled by =ICallable=.
+*** Exception Handling
+    Exceptions are handled by dynamically binding =*exception-handler*=
+    to a function for handling exceptions.
+    When an exception is thrown, =*exception-handler*= is called
+    with the thrown exception passed as the lone parameter.
+
+    =with-exception-handler= is a low-level macro
+    for installing an exception handler.
+    It accepts a form evaluating to a handler function
+    and any number of body forms.
+    The handler is first bound to the current dynamic environment
+    via =$bound-fn*=, then dynamically bound to =*exception-handler*=.
+    Finally, the body forms are executed.
+
+    =default-exception-handler= is an exception handler
+    that simply performs a native =throw=.
+    =trampoline= binds =*exception-handler*= to =default-exception-handler=
+    in the initial dynamic environment,
+    ensuring any exceptions which are unhandled by CPS code are thrown natively.
+
+    The heart of =call= is wrapped in a =try= block.
+    This allows us to catch exceptions thrown from native code.
+    Exceptions caught in this manner are re-cast into the CPS domain
+    by calling (rather than invoking) =raise=.
+
+    =try=, =catch=, and =finally= are implemented
+    in terms of =handler-case= and =unwind-protect=.
 *** =*special-form-handlers*=
     Although most input forms are transformed either as macros
     or function applications,
