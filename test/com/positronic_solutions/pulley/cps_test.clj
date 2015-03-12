@@ -32,8 +32,14 @@ One will be passed through the CPS compiler, the other will not.
 Both forms will then be evaluated and the resulting values compared
 to ensure they are equivalent."
   ([form]
-     `(testing (with-out-str (pprint ~form))
+     `(testing ~(with-out-str (pprint form))
         (is (= ~form
+               (cps ~form)))))
+  ([expected-value form]
+     `(testing ~(with-out-str (pprint `(= ~expected-value
+                                          ~form)))
+        (is (= ~expected-value
+               ~form
                (cps ~form))))))
 
 (deftest test-atomic-expression
@@ -248,6 +254,69 @@ to ensure they are equivalent."
      (verify-form-equiv '(x y z))
      (verify-form-equiv '(x (y) z)))))
 
+(deftest test-try
+  (without-recursive-trampolines
+   (with-strict-cps
+     (verify-form-equiv (try))
+     (verify-form-equiv (try 10))
+     (let [;; work around unimplemented new
+           exception (new IllegalStateException "test")]
+       (is (thrown-with-msg? IllegalStateException #"test"
+                             (cps (try (throw exception)))))))
+   ;; TODO: Implement handler-case in a way that is compatible
+   ;;       with with-strict-cps
+   (let [;; work around unimplemented new
+         exception (new IllegalStateException "test")]
+     (verify-form-equiv (try
+                          (throw exception)
+                          10
+                          (catch IllegalStateException ex
+                            ex))))
+   (let [;; work around unimplemented new
+         exception (new RuntimeException "test")]
+     (verify-form-equiv (try
+                          (throw exception)
+                          10
+                          (catch Throwable ex
+                       ex))))
+   (let [;; work around unimplemented new
+         exception (new RuntimeException "test")]
+     (is (thrown-with-msg? RuntimeException #"test"
+                           (cps (try
+                                  (throw exception)
+                                  (catch IllegalStateException ex
+                                    20))))))
+   (verify-form-equiv (let [a (atom nil)]
+                        (vector (try
+                                  10
+                                  (finally (reset! a 20)))
+                                (deref a))))
+   (verify-form-equiv (let [a (atom nil)
+                            b (atom nil)]
+                        (vector (try
+                                  10
+                                  (finally (reset! a 20)
+                                           (reset! b 30)))
+                                (deref a)
+                                (deref b)))))
+  (testing "Nested trampolines"
+    (letfn [(foo []
+              (try
+                (cps (try
+                       (throw (new Exception))
+                       (catch Exception ex
+                         (throw (new IllegalStateException)))))
+                (catch IllegalStateException ex
+                  (throw (new NullPointerException "Hello")))))]
+      (try
+        (foo)
+        (catch NullPointerException ex
+          (type ex)))
+      (verify-form-equiv (try
+                           (foo)
+                           (catch NullPointerException ex
+                             (type ex)))))))
+
 (deftest test-var-form
   (without-recursive-trampolines
    (with-strict-cps
@@ -303,10 +372,48 @@ to ensure they are equivalent."
                                        x)]
                           (let-cc 4))))))
 
+(deftest test-with-strict-cps
+  (without-recursive-trampolines
+   (with-strict-cps
+     (testing "Happy case"
+       (verify-form-equiv 1)
+       (verify-form-equiv (apply (fn [x y]
+                                   [x y])
+                                 '(1 2))))
+     (testing "Exceptional case"
+       (is (thrown? IllegalStateException
+                    (cps (new NullPointerException)))))
+     (testing "Catch exception within CPS context"
+       (let [foo (fn [] :a)]
+         (is (= :a (foo)))
+         (is (= :b (cps (try
+                          (foo)
+                          (catch IllegalStateException ex
+                            :b))))))))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; Test CPS overrides of select core functions ;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(deftest test-instance?
+  (without-recursive-trampolines
+   (with-strict-cps
+     (testing "Happy path"
+       (verify-form-equiv
+        (instance? Integer 1)))
+     (testing "Non-type for class parameter"
+       (is (thrown? ClassCastException
+                    (instance? 1 1)))
+       (is (thrown? ClassCastException
+                    (cps (instance? 1 1)))))
+     (testing "Catch exception within CPS context"
+       (let [exception-message (fn->callable (fn [cont env ex]
+                                               (. ex (getMessage))))]
+         (verify-form-equiv (try
+                              (instance? 1 1)
+                              (catch ClassCastException ex
+                                (exception-message ex)))))))))
 
 (deftest test-with-bindings
   (without-recursive-trampolines
@@ -335,6 +442,141 @@ to ensure they are equivalent."
                  ;; Use wrong number of arguments here,
                  ;; to ensure the binding stack is never changed
                  (cps (pop-thread-bindings 1 2 3))))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Exception Handling tests ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(deftest test-call-non-callable
+  (without-recursive-trampolines
+   (with-strict-cps
+     (let [expected-message "No implementation of method: :with-continuation of protocol: #'com.positronic-solutions.pulley.cps/ICallable found for class: java.lang.Long"
+           check-exception-message (fn->callable
+                                    (fn [cont env ex expected-message]
+                                      (let [actual-message (. ex (getMessage))]
+                                        (-> (assert (= expected-message
+                                                       actual-message)
+                                                    (str "Unexpected message: "
+                                                         actual-message))
+                                            (cont)))))]
+       (testing "Unhandled Exception"
+         ;; TODO: document this difference
+         (is (thrown? ClassCastException
+                      "java.lang.Long cannot be case to clojure.lang.IFn"
+                      (1 1)))
+         (is (thrown? IllegalArgumentException
+                      expected-message
+                      (cps (1 1)))))
+       (testing "Catch exception in CPS context"
+         (verify-form-equiv (try
+                              (1 1)
+                              ;; For non-cps version
+                              (catch ClassCastException ex
+                                (check-exception-message ex "java.lang.Long cannot be cast to clojure.lang.IFn"))
+                              ;; For cps version
+                              (catch IllegalArgumentException ex
+                                (check-exception-message ex expected-message)))))))))
+
+(deftest test-with-exception-handler
+  (without-recursive-trampolines
+   (with-strict-cps
+     (testing "no exception"
+       (verify-form-equiv :test
+                          (with-exception-handler (fn [ex]
+                                                    :exception)
+                            :test)))
+     (testing "handle exception"
+       ;; TODO:  use verify-form-equiv once we have CPS-agnostic
+       ;;        with-exception-handler
+       (is (= :exception
+              (cps (with-exception-handler (fn [ex]
+                                             :exception)
+                     (1 1))))))
+     (testing "exception while handling exception"
+       (is (thrown? NullPointerException
+                    (cps (with-exception-handler (fn [ex]
+                                                   (instance? nil 1))
+                           (1 1))))))
+     (testing "non-callable handler"
+       (is (thrown-with-msg? IllegalArgumentException
+                             #"No implementation of method: :with-continuation of protocol: #'com.positronic-solutions.pulley.cps/ICallable found for class: nil"
+                             (cps (with-exception-handler nil
+                                    (instance? nil 1))))))
+     (testing "nested handlers"
+       (testing "handle exception in inner handler"
+         (is (= :inner-handler
+                (cps (with-exception-handler (fn [ex]
+                                               :outer-handler)
+                       (with-exception-handler (fn [ex]
+                                                 :inner-handler)
+                         (1 1)))))))
+       (testing "handle exception in outer handler"
+         (is (= :outer-handler
+                (cps (with-exception-handler (fn [ex]
+                                               :outer-handler)
+                       (1 (with-exception-handler (fn [ex]
+                                                    :inner-handler)
+                            :inner-value)))))))
+       (testing "exception rethrown by inner handler"
+         (is (= :outer-handler
+                (cps (with-exception-handler (fn [ex]
+                                               :outer-handler)
+                       (with-exception-handler (fn [ex]
+                                                (throw ex))
+                         (1 1)))))))
+       (testing "exception rethrown by both handlers"
+         (is (thrown? IllegalArgumentException
+                      (cps (with-exception-handler (fn [ex]
+                                                     (throw ex))
+                             (with-exception-handler (fn [ex]
+                                                       (throw ex))
+                               (1 1)))))))))
+   (testing "native function as exception handler"
+     (testing "handle exception"
+       (let [handler (fn [ex]
+                       :exception)]
+         (is (= :exception
+                (cps (with-exception-handler handler
+                       (1 1)))))))
+     (testing "exception while handling exception"
+       (let [handler (fn [ex]
+                       (apply nil []))]
+         (is (thrown? NullPointerException
+                      (cps (with-exception-handler handler
+                             (1 1)))))))
+     (testing "non-callable handler"
+       (is (thrown-with-msg? IllegalArgumentException
+                             #"No implementation of method: :with-continuation of protocol: #'com.positronic-solutions.pulley.cps/ICallable found for class: nil"
+                             (cps (with-exception-handler nil
+                                    (instance? nil 1))))))
+     (testing "nested handlers"
+       (let [outer-handler (fn [ex]
+                             :outer-handler)
+             inner-handler (fn [ex]
+                             :inner-handler)
+             rethrow-handler (fn [ex]
+                               (throw ex))]
+         (testing "handle exception in inner handler"
+           (is (= :inner-handler
+                  (cps (with-exception-handler outer-handler
+                         (with-exception-handler inner-handler
+                           (1 1)))))))
+         (testing "handle exception in outer handler"
+           (is (= :outer-handler
+                  (cps (with-exception-handler outer-handler
+                         (1 (with-exception-handler inner-handler
+                              :inner-value)))))))
+         (testing "exception rethrown by inner handler"
+           (is (= :outer-handler
+                  (cps (with-exception-handler outer-handler
+                         (with-exception-handler rethrow-handler
+                           (1 1)))))))
+         (testing "exception rethrown by both handlers"
+           (is (thrown? IllegalArgumentException
+                        (cps (with-exception-handler rethrow-handler
+                               (with-exception-handler rethrow-handler
+                                 (1 1))))))))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

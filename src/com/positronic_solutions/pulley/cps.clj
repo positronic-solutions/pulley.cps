@@ -18,6 +18,11 @@
 (ns com.positronic-solutions.pulley.cps
   (:require [clojure.repl :as repl]))
 
+(declare call)
+(declare ^:dynamic *exception-handler*)
+(declare default-exception-handler)
+(declare raise)
+
 (def ^:dynamic *trampoline-depth*
   "Records the number of trampolines active on the current stack."
   0)
@@ -46,6 +51,11 @@ Default: false"
 (defprotocol IThunk
   (invoke-thunk [thunk]))
 
+(defmacro thunk [& body]
+  `(reify IThunk
+     (invoke-thunk [self]
+       ~@body)))
+
 (defprotocol ICallable
   (with-continuation [callable cont env]))
 
@@ -64,26 +74,34 @@ Default: false"
       #_(println "Calling native fn: " f args env)
       (with-thread-binding-frame env
         #_(println "Thread Bindings: " (get-thread-bindings))
-        (when *strict-cps*
-          (throw (new IllegalStateException
-                      (str "Attempt to call non-CPS routine "
-                           f
-                           " while *strict-cps* is set."))))
-        (cont (apply f args))))))
+        (if *strict-cps*
+          ;; then (raise exception)
+          (thunk (call raise
+                       cont env
+                       (new IllegalStateException
+                            (str "Attempt to call non-CPS routine "
+                                 f
+                                 " while *strict-cps* is set."))))
+          ;; else (invoke the function)
+          (cont (apply f args)))))))
 
 (defn call [f cont env & args]
   #_(println "call: continuation is " cont)
   #_(println "call: env is " env)
   #_(println "calling " f args)
   ;; TODO: thunk this (so we don't have to thunk it everywhere it's called)?
-  (apply (with-continuation f cont env) args))
+  (try
+    (apply (with-continuation f cont env) args)
+    (catch Throwable ex
+      (call raise cont env ex))))
 
 (defn trampoline
   "Runs f on a trampoline, and returns the resulting value."
   ([f & args]
      (if (or *allow-recursive-trampolines*
              (= *trampoline-depth* 0))
-       (binding [*trampoline-depth* (inc *trampoline-depth*)]
+       (binding [*trampoline-depth* (inc *trampoline-depth*)
+                 *exception-handler* default-exception-handler]
          (let [current-frame (clojure.lang.Var/getThreadBindingFrame)
                initial-frame (clojure.lang.Var/cloneThreadBindingFrame)]
            (with-thread-binding-frame current-frame
@@ -92,11 +110,6 @@ Default: false"
                  (recur (invoke-thunk value))
                  value)))))
        (throw (new IllegalStateException "Attempt to invoke recursive trampoline, but *allow-recursive-trampolines* does not allow it.")))))
-
-(defmacro thunk [& body]
-  `(reify IThunk
-     (invoke-thunk [self]
-       ~@body)))
 
 (defn fn->callable
   "Reifies f to implement both ICallable and IFn.
@@ -238,6 +251,15 @@ Usage:
   ([[cc] & body]
     (throw (new IllegalStateException "let-cc can only be used inside cps and cps-fn forms"))))
 
+(defn translate-to
+  "Helper for constructing handler functions
+for translating forms from one language to another.
+Basically, the operator of the input form is replaced
+with the symbol parameter."
+  ([symbol]
+     (fn [[operator & body] &env cont env]
+       `(cps-expr ~cont ~env (~symbol ~@body)))))
+
 (def ^:dynamic *special-form-handlers*
   "Contains a map specifying how special forms are handled.
 
@@ -289,6 +311,9 @@ The handler function must accept the following parameters (in order)
             `(cps-quote ~cont ~env ~@body))
    'set! (fn expand-set! [[operator & body] &env cont env]
            `(cps-set! ~cont ~env ~@body))
+   'throw (translate-to `raise)
+   'try (fn expand-try [[operator & body] &env cont env]
+          `(cps-try ~cont ~env ~@body))
    'var (fn expand-var [[operator & body] &env cont env]
           `(cps-var ~cont ~env ~@body))})
 
@@ -691,6 +716,39 @@ Otherwise, the resulting form will evaluate direcly to the function."
                   ~env
                   ~expr))))
 
+(defmacro cps-try
+  ([cont env & exprs]
+     (let [catch-block? (fn [expr]
+                          (and (seq? expr)
+                               (= `catch (first expr))))
+           finally-block? (fn [expr]
+                            (and (seq? expr)
+                                 (= `finally (first expr))))
+           body-expr? (fn [expr]
+                        (not (and (seq? expr)
+                                  (or (catch-block? expr)
+                                      (finally-block? expr)))))
+           protected-exprs (filter body-expr? exprs)
+           catch-blocks (filter catch-block? exprs)
+           finally-blocks (filter finally-block? exprs)]
+       (when (> (count finally-blocks) 1)
+         (throw (new RuntimeException "finally clause must be last in try expression")))
+       (let [protected-form `(do ~@protected-exprs)
+             handler-case-form (if (empty? catch-blocks)
+                        protected-form
+                        `(handler-case ~protected-form
+                                       ~@(map (fn [[_ ex-type name & body]]
+                                                `(~ex-type [~name]
+                                                           ~@body))
+                                              catch-blocks)))
+             unwind-protect-form (if (empty? finally-blocks)
+                                   handler-case-form
+                                   `(unwind-protect ~handler-case-form
+                                                    ~@(-> finally-blocks
+                                                          (first)
+                                                          (rest))))]
+         `(cps-expr ~cont ~env ~unwind-protect-form)))))
+
 (defmacro cps-var
   ([cont env symbol]
      `(~cont (var ~symbol))))
@@ -802,6 +860,11 @@ thus effectively preventing the function from being called from a CPS context."
     (fn [f & args]
       (apply call f cont env (apply list* args)))))
 
+;; CPS override of instance?
+(override-fn* instance?
+              (fn->callable (fn [cont env class obj]
+                              (cont (instance? class obj)))))
+
 ;; CPS override of get-thread-bindings
 (extend-type (type get-thread-bindings)
   ICallable
@@ -827,6 +890,82 @@ thus effectively preventing the function from being called from a CPS context."
 ;; Forbid pop-thread-bindings
 (forbid-fn! pop-thread-bindings
             "push-thread-bindings/pop-thread-bindings can not be used in CPS code.  Use a higher-level construct, such as with-bindings, instead.")
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Exception Handling ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn default-exception-handler
+  ([ex]
+     (throw ex)))
+
+(override-fn* default-exception-handler
+              (fn->callable (fn [cont env ex]
+                              (thunk (throw ex)))))
+
+(def ^:dynamic *exception-handler*
+  default-exception-handler)
+
+(def raise
+  (cps-fn [ex]
+    (*exception-handler* ex)))
+
+(defmacro with-exception-handler
+  "Executes body in a context with f installed
+as the exception handler function."
+  ;; TODO: Implement this in a CPS-agnostic manner.
+  ;;       That is, if we aren't in the CPS compiler,
+  ;;       convert this to the try-catch block.
+  ([f & body]
+     `(binding [*exception-handler* ($bound-fn* ~f)]
+        ~@body)))
+
+(defmacro handler-case
+  "Executes protected in an environment with the specified exception-handlers
+installed as exception handlers.
+If protected exits normally, handler-case returns its value.
+Otherwise (if protected throws an exception),
+the first exception-handler that matches the thrown exception type
+will be invoked.
+If no matching handler is found, the exception is re-thrown.
+
+exception-handlers => exception-handler*
+
+exception-handler => (exception-type [name] & handler-body)
+* exception-type - Type of exception to be handled by this case.
+                   An exception will match this case if it is of this type
+                   or a sub-type of this type.
+* name - Name (variable) to which the thrown exception will be bound.
+* handler-body - sequence of expressions to be evaluated
+                 when a matching exception is thrown."
+  ([protected & exception-handlers]
+     (let [cc (gensym "cc_")
+           ex (gensym "ex_")]
+       `(let-cc [~cc]
+          (with-exception-handler
+            (fn [~ex]
+              (~cc (cond ~@(mapcat (fn [[ex-t [ex-v] & body]]
+                                    [`(instance? ~ex-t ~ex)
+                                     `(let [~ex-v ~ex]
+                                        ~@body)])
+                                  exception-handlers)
+                        :else (throw ~ex))))
+            ~protected)))))
+
+(defmacro unwind-protect
+  ([protected & cleanup]
+     (let [cleanup-thunk (gensym "cleanup-thunk_")
+           ex (gensym "ex_")
+           result (gensym "value_")]
+       `(let [~cleanup-thunk (fn []
+                               ~@cleanup)
+              ~result (with-exception-handler (fn [~ex]
+                                                (~cleanup-thunk)
+                                                (throw ~ex))
+                        ~protected)]
+          (~cleanup-thunk)
+          ~result))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
