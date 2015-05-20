@@ -23,6 +23,10 @@
 (declare default-exception-handler)
 (declare raise)
 
+(def ^:dynamic *compiling-cps*
+  "Set to true when the CPS compiler expands a macro"
+  false)
+
 (def ^:dynamic *trampoline-depth*
   "Records the number of trampolines active on the current stack."
   0)
@@ -419,7 +423,8 @@ not a form representing a function."
       ;; then (handle as a "special form")
       `(cps-special-form ~cont ~env ~form)
       ;; else (attempt to expand)
-      (let [expanded (macroexpand-1 form)]
+      (let [expanded (binding [*compiling-cps* true]
+                       (macroexpand-1 form))]
         (if (identical? form expanded)
           ;; then (expansion complete => handle as function call)
           `(cps-call ~cont ~env ~@expanded)
@@ -771,6 +776,26 @@ Otherwise, the resulting form will evaluate direcly to the function."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; Helper macros for generating CPS overrides of native functions ;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defmacro override-macro!
+  ([name & fn-spec]
+     (let [macro-var (resolve &env name)
+           normalized-spec (-> `(fn ~@fn-spec)
+                               (doto (println))
+                               (macroexpand)
+                               (rest))
+           injected-spec (for [[arglist & body] normalized-spec]
+                           `([~'&form ~'&env ~@arglist]
+                               ~@body))
+           cps-fn-form `(fn ~@injected-spec)]
+       `(alter-var-root ~macro-var
+                        (fn [original-fn#]
+                          (let [cps-fn# ~cps-fn-form]
+                            (fn [~'&form ~'&env & args#]
+                              (if *compiling-cps*
+                                ;; then (call CPS version)
+                                (apply cps-fn# ~'&form ~'&env args#)
+                                (apply original-fn# ~'&form ~'&env args#)))))))))
 
 (defmacro override-fn*
   "Version of override-fn that accepts an ICallable object,

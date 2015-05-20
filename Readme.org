@@ -225,7 +225,7 @@
 ** CPS Overrides
    In order to enhance the interoperability between CPS code and existing code,
    =pulley.cps= provides the ability to "override" an existing Clojure function
-   with a CPS implementation.
+   or macro with a CPS implementation.
    Although it is possible to do this directly via low-level interfaces,
    it is recommended to use one of the following:
    * =override-fn= :: Overrides the given function
@@ -241,6 +241,9 @@
    * =forbid-fn!= :: Given a function, will generate a CPS override
                      for that function that prevents the function
                      from being called from CPS code.
+   * =override-macro!= :: Overrides the given macro
+        with the provided implementation
+        when it is expanded by the CPS compiler.
 *** Overridden Core Functions
     =pulley.cps= provides CPS overrides
     for the following =clojure.core= functions:
