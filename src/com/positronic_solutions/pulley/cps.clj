@@ -937,11 +937,16 @@ thus effectively preventing the function from being called from a CPS context."
     (*exception-handler* ex)))
 
 (defmacro with-exception-handler
-  "Executes body in a context with f installed
-as the exception handler function."
-  ;; TODO: Implement this in a CPS-agnostic manner.
-  ;;       That is, if we aren't in the CPS compiler,
-  ;;       convert this to the try-catch block.
+  "Executes body in a context with f effectively installed
+as an exception handler function."
+  ([f & body]
+     (let [$ex (gensym "$ex_")]
+       `(try
+          ~@body
+          (catch Throwable ~$ex
+            (~f ~$ex))))))
+
+(override-macro! with-exception-handler
   ([f & body]
      `(binding [*exception-handler* ($bound-fn* ~f)]
         ~@body)))

@@ -353,9 +353,15 @@
     for installing an exception handler.
     It accepts a form evaluating to a handler function
     and any number of body forms.
-    The handler is first bound to the current dynamic environment
-    via =$bound-fn*=, then dynamically bound to =*exception-handler*=.
+    =with-exception-handler= is CPS agnostic,
+    meaning you can use it with equal effect
+    from both CPS-transformed and non-transformed code
+    (this is accomplished via =override-macro!=).
+    When expanded by the CPS compiler, the handler function
+    will first be bound to the current dynamic environment
+    (via =$bound-fn*=), then dynamically bound to =*exception-handler*=.
     Finally, the body forms are executed.
+    The non-cps version is similar, except it simply uses a =try=/=catch= block.
 
     =default-exception-handler= is an exception handler
     that simply performs a native =throw=.

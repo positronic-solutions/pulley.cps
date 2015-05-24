@@ -487,12 +487,10 @@ to ensure they are equivalent."
                                                     :exception)
                             :test)))
      (testing "handle exception"
-       ;; TODO:  use verify-form-equiv once we have CPS-agnostic
-       ;;        with-exception-handler
-       (is (= :exception
-              (cps (with-exception-handler (fn [ex]
-                                             :exception)
-                     (1 1))))))
+       (verify-form-equiv :exception
+                          (with-exception-handler (fn [ex]
+                                                    :exception)
+                            (1 1))))
      (testing "exception while handling exception"
        (is (thrown? NullPointerException
                     (cps (with-exception-handler (fn [ex]
