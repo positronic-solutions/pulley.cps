@@ -1,0 +1,268 @@
+#+TITLE: Implementing Communicating Sequential Processes over Continuations
+#+SUBTITLE: An example using pulley.cps
+#+AUTHOR: Nathan Davis (Positronic Solutions, LLC)
+
+* Introduction
+  This example shows how a simple [[http://www.usingcsp.com/cspbook.pdf][CSP (Communicating Sequential Processes)]]
+  framework can be built on top of [[https://github.com/positronic-solutions/pulley.cps][=pulley.cps=]].
+  This example builds upon the [[file:cooperative-multitasking.org][Cooperative Multitasking]] example.
+
+  This simple implementation ommits important features
+  necessary for a production-quality framework,
+  such as simultaneous operations on multiple channels.
+
+  This is a literate programming document written in Emacs Org-Mode.
+  The clojure source code can be extracted from the source document
+  and executed.
+* Overview
+  CSP consists of two primary abstractions:
+  * processes
+  * channels
+
+  For purposes of this example,
+  we will implement channels as multi-arity closures.
+  If =ch= is a channel, then =(ch)= takes a value from the channel,
+  and =(ch val)= puts the value =val= on the channel.
+
+  For processes, we will reuse the implementation
+  provided in the Cooperative Multitasking example.
+  The reader is referred to that work for further details.
+* Channel Implementation
+** Take
+   We will start by implementing a function to implement
+   the functionality of taking (reading) a value from a channel.
+   We will assume the existance of =read-queue=
+   and =write-queue= variables which respectively hold
+   processes waiting to read from and write to a channel.
+   We will worry about the implementation of these queues later.
+
+   Note that while both queues may be empty,
+   only one should contain values at any given point in time.
+   If there are readers waiting, then writes will be immediate
+   and not require a wait.
+   Likewise, if there are writers waiting then any read will be immediate.
+
+   #+name: channel—fn/0
+   #+begin_src clojure :exports none
+     ;; Take
+     ([]
+       (if-let [writer (. write-queue (poll))]
+         ;; then (use writer from write-queue)
+         (writer)
+         ;; else (wait for writer)
+         (cps/let-cc [cc]
+           (let [callback (fn [v]
+                            (schedule (fn []
+                                        (cc v))))]
+             (. read-queue (add callback))
+             (schedule)))))
+   #+end_src
+
+   #+begin_src clojure :noweb yes
+     (cps/cps-fn
+       <<channel—fn/0>>)
+   #+end_src
+
+   The fundamental logic is as follows:
+   * If there is a writer waiting in =write-queue=,
+     remove it from the queue, read its value,
+     and return immediately.
+   * Otherwise (if =write-queue= is empty),
+     we need to block until a value is available.
+     We do this as follows:
+     * Capture the current continuation
+     * Construct a callback that accepts a value,
+       then schedules the resumption of the captured continuation
+       with that value.
+       This becomes the return value of the function.
+     * Adds the callback to the =read-queue=.
+     * Invokes the scheduler.
+       Recall that =(schedule)= is a non-returning function.
+       Therefore, the function will only return when the callback is called
+       (which in turn schedules the captured continuation).
+** Put
+   Putting (writing) a value onto a channel is similar.
+   The primary difference is the reversal of the roles
+   played by =read-queue= and =write-queue=.
+   Other differences are:
+   * The function always returns =nil=.
+   * The callback function returns, instead of accepting, a value.
+
+   #+name: channel—fn/1
+   #+begin_src clojure :exports none
+     ;; Put
+     ([v]
+       (if-let [reader (. read-queue (poll))]
+         ;; then (use reader from read-queue)
+         (reader v)
+         ;; else (wait for reader)
+         (cps/let-cc [cc]
+           (let [callback (fn []
+                            (schedule (fn []
+                                        (cc nil)))
+                            v)]
+             (. write-queue (add callback))
+             (schedule)))))
+   #+end_src
+
+   #+begin_src clojure :noweb yes
+     (cps/cps-fn
+       <<channel—fn/1>>)
+   #+end_src
+** Read/Write Queues
+   Each channel needs a read and write queue.
+   We will create the queues and =let=-bind them as follows:
+
+   #+name: channel—let—bindings
+   #+begin_src clojure :exports none
+     [read-queue (new java.util.concurrent.ConcurrentLinkedQueue)
+      write-queue (new java.util.concurrent.ConcurrentLinkedQueue)]
+   #+end_src
+
+   #+begin_src clojure :noweb yes
+     (let
+         <<channel—let—bindings>>)
+   #+end_src
+** Constructing Channels
+   We are now ready to combine the code in this section
+   into a function that constructs a channel:
+
+   #+name: channel
+   #+begin_src clojure :noweb yes
+     (def channel
+       "Constructs and returns a new channel."
+       (cps/cps-fn
+         ([]
+           (let
+               <<channel—let—bindings>>
+             (fn
+               <<channel—fn/0>>
+               <<channel—fn/1>>)))))
+   #+end_src
+* Example Usage
+** Ping Pong
+   In this example, we'll spawn two processes that interact with each other.
+   Each will read from a channel and produce values on a channel.
+   The channel read from and written to will be reversed for each process.
+   Each process will also =sleep= for some specified amount of time.
+
+   The "ping" process is defined as follows:
+
+   #+name: ping-pong—ping
+   #+begin_src clojure
+     (spawn (letfn [(f []
+                      (sleep ping-delay)
+                      (pong "ping")
+                      (println (ping))
+                      (f))]
+              f))
+   #+end_src
+
+   The "pong" process is similar:
+
+   #+name: ping-pong—pong
+   #+begin_src clojure
+     (spawn (letfn [(f []
+                      (println (pong))
+                      (sleep pong-delay)
+                      (ping "pong")
+                      (f))]
+              f))
+   #+end_src
+
+   Note the use of the following free variables:
+   * ping :: the channel from which the "ping" process will read
+	     and to which the "pong" process will write
+   * pong :: the channel from which the "pong" process will read
+	     and to which the "ping" process will write
+   * ping-delay :: amount of time (in mili-seconds)
+		   the "ping" process will sleep each time through its loop
+   * pong-delay :: amount of time (in mili-seconds)
+		   the "pong" process will sleep each time through its loop
+
+   As usual, we will introduce a constructor function
+   to provide definitions for these variables.
+
+   #+name: ping-pong
+   #+begin_src clojure :noweb yes
+     (def ping-pong
+       "Test for process cooperation and sleeping."
+       (cps/cps-fn
+         ([]
+           (ping-pong 5000))
+         ([delay]
+           (ping-pong delay delay))
+         ([ping-delay pong-delay]
+           (let [ping (channel)
+                 pong (channel)]
+             <<ping-pong—ping>>
+             <<ping-pong—pong>>))))
+   #+end_src
+
+   Now calling =(ping-pong)= will result in alternating lines
+   of "ping" and "pong", with a five second delay between each line.
+   We can change the delay by passing a value to =ping-pong=.
+   For example, =(ping-pong 1000)= will result in a delay of 1 second.
+   Finally, we can set the delays
+   for the "ping" and "pong" processes independently.
+   E.g., =(ping 1000 2000)=.
+** Printer
+   Developing a process that consumes items from a channel
+   and prints them is trivial:
+
+   #+name: printer
+   #+begin_src clojure
+     (def printer
+       "Accepts a channel and spawns a process that prints values read
+     from that channel."
+       (cps/cps-fn
+         ([src-chan]
+           (spawn (letfn [(f []
+                            (println (src-chan))
+                            (f))]
+                    f)))))
+   #+end_src
+** Ping-Pong with Printer
+   Now instead of calling =println= directly,
+   we can implement our ping and pong processes
+   using a printer process:
+
+   #+name: ping-pong-printer
+   #+begin_src clojure
+     (def ping-pong-printer
+       "Ping Pong with Printer process"
+       (cps/cps-fn
+         ([]
+           (ping-pong-printer 5000))
+         ([delay]
+           (ping-pong-printer delay delay))
+         ([ping-delay pong-delay]
+           (let [ping (channel)
+                 pong (channel)
+                 print (channel)]
+             (printer print)
+             (spawn (letfn [(f []
+                              (sleep ping-delay)
+                              (pong "ping")
+                              (print (ping))
+                              (f))]
+                      f))
+             (spawn (letfn [(f []
+                              (print (pong))
+                              (sleep pong-delay)
+                              (ping "pong")
+                              (f))]
+                      f))))))
+   #+end_src
+* Code Listing
+  #+begin_src clojure -n :noweb yes :tangle csp.clj
+    (load-file "examples/cooperative-multitasking.clj")
+
+    <<channel>>
+
+    <<ping-pong>>
+
+    <<printer>>
+
+    <<ping-pong-printer>>
+  #+end_src
