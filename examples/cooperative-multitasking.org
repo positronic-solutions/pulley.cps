@@ -1,0 +1,360 @@
+#+TITLE: Cooperative Multitasking using Continuations: An example using pulley.cps
+# #+SUBTITLE: An example using pulley.cps
+#+AUTHOR: Nathan Davis (Positronic Solutions, LLC)
+#+LATEX_HEADER: \usepackage[margin=1in]{geometry}
+#+LATEX_HEADER: \usepackage[T1]{fontenc}
+#+LATEX_HEADER: \usepackage[scaled]{beraserif}
+#+LATEX_HEADER: \usepackage[scaled]{berasans}
+#+LATEX_HEADER: \usepackage[scaled]{beramono}
+
+* Introduction
+  This is an example of how to implement cooperative multitasking
+  using [[https://github.com/positronic-solutions/pulley.cps][=pulley.cps=]].
+
+  This is a literate programming document written in Emacs Org-Mode.
+  The clojure source code can be extracted from the source document
+  and executed.
+* Task Management Kernel
+** The Task Queue
+   Any multitasking kernel will need a task queue.
+   This queue will contain tasks that are ready to run.
+   We define this queue as:
+
+   #+name: task-queue
+   #+begin_src clojure
+     (def task-queue
+       "Queue of tasks that are ready to run."
+       (new java.util.concurrent.LinkedBlockingQueue))
+   #+end_src
+
+   We have used a [[https://docs.oracle.com/javase/7/docs/api/java/util/concurrent/LinkedBlockingQueue.html][=LinkedBlockingQueue=]] for this example.
+** The Scheduler
+   The scheduler consists of the following items:
+   * A =schedule= function that handles the scheduling
+   * An =executor= thread that executes tasks on the =task-queue=
+
+   The scheduler must both accept tasks that are ready for execution
+   and execute tasks on the ready queue.
+   We will use different arities of the =schedule= function
+   to perform these tasks.
+
+   The following function accepts a task and adds it to the ready queue.
+   It then returns control to the originating task.
+
+   #+name: schedule/1
+   #+begin_src clojure :exports none
+     ([task]
+       (when-not (. task-queue (offer task))
+         (throw (new IllegalStateException "Task queue is full!"))))
+   #+end_src
+
+   #+begin_src clojure :noweb yes
+     (def schedule
+       (cps/cps-fn
+         <<schedule/1>>))
+   #+end_src
+
+   Calling =schedule= with no arguments will cause a context switch
+   to the next task in the queue.
+
+   #+name: schedule/0
+   #+begin_src clojure :exports none
+     ([]
+      (let [task (. task-queue (take))]
+        (task)
+        (schedule)))
+   #+end_src
+
+   #+begin_src clojure :noweb yes
+     (def schedule
+       (cps/cps-fn
+        <<schedule/0>>))
+   #+end_src
+
+   A couple things to note about this function:
+
+   1. If =task-queue= is empty, it will block until a task is queued.
+   2. The recursive call to =schedule= ensures that it will never return
+      to the context that called it.
+      I.e., it is a non-returning function.
+
+   We combine these functions to obtain the final =schedule= function:
+
+   #+name: schedule
+   #+begin_src clojure :noweb yes
+     (def schedule
+       "[]
+       Takes the next task in the task-queue and runs it.
+       If there are no tasks in the queue, it will block until one is available.
+
+       NOTE: This function does not return!
+
+     [task]
+       Adds the given task to the task queue, thereby scheduling it for execution.
+       Returns nil."
+       (cps/cps-fn
+        <<schedule/0>>
+        <<schedule/1>>))
+   #+end_src
+
+   Now we can define the =executor= thread.
+   This simply loops continuously, scheduling tasks.
+
+   #+name: executor
+   #+begin_src clojure
+     (def executor
+       "This is the Thread that executes tasks."
+       (doto (new Thread (fn []
+                           (loop []
+                             (schedule)
+                             (throw (new IllegalStateException "schedule returned")))))
+         (. (start))))
+   #+end_src
+
+   Remember that the zero-arity version of =schedule=
+   is a non-returning function.
+   Therefore, it would be an error if =schedule= were to return.
+   In the event there is a bug and =schedule= does return for some reason,
+   we throw an =IllegalStateException=.
+   In theory, this means that the =loop= in the code is meaningless.
+   However, we keep it in here, because it helps communicate
+   the idea that the function "loops" forever.
+** Spawning Tasks
+   Now that we have a scheduler, we can define a =spawn= function.
+   This will accept a task (a CPS-transformed function),
+   schedule it, and then return.
+
+   #+name: spawn
+   #+begin_src clojure
+     (def spawn
+       "Binds the current dynamic environment to task
+     and schedules it for execution."
+       (cps/cps-fn
+        ([task]
+         (schedule (cps/$bound-fn* task)))))
+   #+end_src
+
+   Note that we bind the =task= function to the current dynamic environment.
+   Therefore, the task will execute with the same dynamic environment
+   as its spawner.
+   This is analogous to a process inheriting its parents environment.
+
+* Time/Delay Management
+  Now that we have the scheduler core, we can start to build upon it.
+  In this section, we will construct functions for managing
+  time and delays.
+** Core Delay Functionality
+   The first thing we'll need is a place to store tasks
+   that are waiting for some period of time.
+   We'll use a [[https://docs.oracle.com/javase/7/docs/api/java/util/concurrent/DelayQueue.html][=DelayQueue=]] for this.
+
+   #+name: delay-queue
+   #+begin_src clojure
+     (def delay-queue
+       "Queue of currently sleeping tasks."
+       (new java.util.concurrent.DelayQueue))
+   #+end_src
+
+   Next, we need a way of resuming tasks at the right time.
+   We'll use a thread dedicated to this purpose:
+
+   #+name: delay-thread
+   #+begin_src clojure
+     (def delay-thread
+       "Thread responsible for resuming sleeping tasks."
+       (doto (new Thread (fn []
+                           (loop []
+                             (let [task (. delay-queue (take))]
+                               (schedule task)
+                               (recur)))))
+         (. (start))))
+   #+end_src
+
+   This simply loops on the =delay-queue=.
+   Because of the way =DelayQueue= is implemented,
+   this function will wait until the task's delay time is up
+   before resuming it.
+** User Functions
+   Now we need to define the public interface.
+
+   The first function we'll make is a function to block a task
+   until a certain time.
+   Other functions will be built around this function.
+   But first, we need a utility function to get the current system time.
+
+   #+name: current-time
+   #+begin_src clojure
+     (defn current-time
+       "Returns the current time in milliseconds."
+       ([]
+         (System/currentTimeMillis)))
+   #+end_src
+
+   Now we can define =schedule-at= as:
+
+   #+name: schedule-at
+   #+begin_src clojure
+     (defn schedule-at
+       "Schedules the given task for execution at the given time."
+       ([task time-ms]
+          (let [entry (reify
+                        java.util.concurrent.Delayed
+                        (getDelay [self time-unit]
+                          (let [time-left (- time-ms (current-time))]
+                            (. time-unit (convert time-left java.util.concurrent.TimeUnit/MILLISECONDS))))
+
+                        Comparable
+                        (compareTo [self other]
+                          (let [self-delay (. self (getDelay java.util.concurrent.TimeUnit/MILLISECONDS))
+                                other-delay (. other (getDelay java.util.concurrent.TimeUnit/MILLISECONDS))]
+                            (cond (< self-delay other-delay) -1
+                                  (= self-delay other-delay) 0
+                                  :else 1)))
+
+                        cps/ICallable
+                        (with-continuation [self cont env]
+                          (cps/with-continuation task cont env)))]
+            (. delay-queue (put entry)))))
+   #+end_src
+
+   =sleep-until= is similar, except it operates on the current task.
+   That is, it suspends the current task until the given time.
+
+   #+name: sleep-until
+   #+begin_src clojure
+     (def sleep-until
+       "Suspends the current task until the given time."
+       (cps/cps-fn
+        ([time-ms]
+           (cps/let-cc [cc]
+                       (schedule-at (fn []
+                                      (cc nil))
+                                    time-ms)
+                       (schedule)))))
+   #+end_src
+
+   Now we can define =sleep=, which suspends the current task
+   for the given duration.
+
+   #+name: sleep
+   #+begin_src clojure
+     (def sleep
+       "Suspends the current task for the given duration."
+       (cps/cps-fn
+        ([time-ms]
+           (sleep-until (+ time-ms (current-time))))))
+   #+end_src
+* Example Usage
+  Now that we have a basic framework in place,
+  let's see how to use it.
+  We'll create a task that sleeps for some number of milliseconds,
+  then prints a line of text.
+
+  First of all, let's create a task function
+
+  #+name: sleeping-task--task/0--body
+  #+begin_src clojure :exports none
+    (println "Task " id)
+    (sleep delay)
+    (task)
+  #+end_src
+
+  #+begin_src clojure :noweb yes
+    (cps/cps-fn task []
+      <<sleeping-task--task/0--body>>)
+  #+end_src
+
+  Note that we have two free variables here:  =id= and =delay=.
+  These respectively represent some arbitrary identifier for the task
+  (in order to distinguish lines printed by different tasks)
+  and the delay (in milliseconds).
+
+  Now let's wrap the task function in a constructor function,
+  to create bindings for these free variables.
+
+  #+name: sleeping-task/2
+  #+begin_src clojure :exports none :noweb yes
+    ([id delay]
+      (letfn [(task []
+                <<sleeping-task--task/0--body>>)]
+        task))
+  #+end_src
+
+  #+begin_src clojure :noweb yes
+    (def sleeping-task
+      (cps/cps-fn
+        <<sleeping-task/2>>))
+  #+end_src
+
+  For ease of use, let's provide a default of =1000= for the =delay=:
+
+  #+name: sleeping-task/1
+  #+begin_src clojure :exports none
+    ([id]
+      (sleeping-task id 1000))
+  #+end_src
+
+  #+name: sleeping-task
+  #+begin_src clojure :noweb yes
+    (def sleeping-task
+      "Example task that prints a message every delay milliseconds (default 1000)"
+      (cps/cps-fn
+        <<sleeping-task/1>>
+        <<sleeping-task/2>>))
+  #+end_src
+
+  We can now construct a task and =spawn= it to execute it:
+
+  #+begin_src clojure
+    (spawn (sleeping-task 1))
+  #+end_src
+
+  This will print
+
+  #+begin_example
+      Task  1
+  #+end_example
+
+  every second.
+* Code Listing
+  :PROPERTIES:
+  :APPENDIX: t
+  :END:      
+
+  #+BEGIN_SRC clojure -n :noweb yes :tangle cooperative-multitasking.clj
+    ;; This example shows how pulley.cps can be used to implement
+    ;; cooperative multitasking.
+
+    (require '[com.positronic-solutions.pulley.cps :as cps])
+
+
+    ;; Basic task management
+
+    <<task-queue>>
+
+    <<schedule>>
+
+    <<executor>>
+
+    <<spawn>>
+
+
+    ;; Time/Delay management
+
+    <<delay-queue>>
+
+    <<delay-thread>>
+
+    <<current-time>>
+
+    <<schedule-at>>
+
+    <<sleep-until>>
+
+    <<sleep>>
+
+
+    ;; Sleeping Task Example
+
+    <<sleeping-task>>
+  #+END_SRC
