@@ -781,7 +781,7 @@ Otherwise, the resulting form will evaluate direcly to the function."
   ([name & fn-spec]
      (let [macro-var (resolve &env name)
            normalized-spec (-> `(fn ~@fn-spec)
-                               (doto (println))
+                               #_(doto (println))
                                (macroexpand)
                                (rest))
            injected-spec (for [[arglist & body] normalized-spec]
