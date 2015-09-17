@@ -16,6 +16,7 @@
 ;; along with pulley.cps.  If not, see <http://www.gnu.org/licenses/>.
 
 (ns com.positronic-solutions.pulley.cps-test
+  (:refer-clojure :exclude [trampoline])
   (:use clojure.test
         [clojure.pprint :only [pprint]]
         com.positronic-solutions.pulley.cps))

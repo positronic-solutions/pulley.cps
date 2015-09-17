@@ -16,6 +16,7 @@
 ;; along with pulley.cps.  If not, see <http://www.gnu.org/licenses/>.
 
 (ns com.positronic-solutions.pulley.cps
+  (:refer-clojure :exclude [trampoline])
   (:require [clojure.repl :as repl]))
 
 (declare call)
