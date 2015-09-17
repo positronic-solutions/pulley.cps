@@ -254,6 +254,16 @@ to ensure they are equivalent."
      (verify-form-equiv '(x y z))
      (verify-form-equiv '(x (y) z)))))
 
+(deftest test-set!
+  (without-recursive-trampolines
+   (with-strict-cps
+     (verify-form-equiv [[1 2] 0]
+                        (let [a (binding [*foo* 1]
+                                  (let [b *foo*]
+                                    (set! *foo* 2)
+                                    [b *foo*]))]
+                          [a *foo*])))))
+
 (deftest test-try
   (without-recursive-trampolines
    (with-strict-cps

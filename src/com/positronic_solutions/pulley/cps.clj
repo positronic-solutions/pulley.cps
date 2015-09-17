@@ -708,16 +708,20 @@ Otherwise, the resulting form will evaluate direcly to the function."
 
 (defmacro cps-set!
   ([cont env place expr]
-     ;; TODO: I don't think there's a case where set!
-     ;; is allowed on a var except when it's dynamic,
-     ;; and we don't really support mutable dynamic environments yet,
-     ;; so just disallow any attempt to set! a symbol.
-     (when (symbol? place)
-       (throw (new UnsupportedOperationException
-                   "Using set! on vars is not supported yet in CPS code")))
+     ;; If place is a var, we could check at compile time
+     ;; to ensure it is dynamic
      (let [value (gensym "value_")]
        `(cps-expr (fn [~value]
-                    (~cont (set! ~place ~value)))
+                    ~(if (symbol? place)
+                       ;; then (need to check if 'place' is dynamic)
+                       (if (dynamic? (resolve &env place))
+                         ;; then (set! ok)
+                         `(with-thread-binding-frame ~env
+                            (~cont (set! ~place ~value)))
+                         ;; else (can't set! non-dynamic var)
+                         (throw (new IllegalStateException (str "Refusing to CPS transform set! on non-dynamic var: " place))))
+                       ;; else
+                       `(~cont (set! ~place ~value))))
                   ~env
                   ~expr))))
 
