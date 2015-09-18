@@ -271,28 +271,28 @@ to ensure they are equivalent."
      (verify-form-equiv (try))
      (verify-form-equiv (try 10))
      (let [;; work around unimplemented new
-           exception (new IllegalStateException "test")]
-       (is (thrown-with-msg? IllegalStateException #"test"
+           exception (new IllegalStateException "test123")]
+       (is (thrown-with-msg? IllegalStateException #"test123"
                              (cps (try (throw exception)))))))
    ;; TODO: Implement handler-case in a way that is compatible
    ;;       with with-strict-cps
    (let [;; work around unimplemented new
-         exception (new IllegalStateException "test")]
+         exception (new IllegalStateException "test123")]
      (verify-form-equiv (try
                           (throw exception)
                           10
                           (catch IllegalStateException ex
                             ex))))
    (let [;; work around unimplemented new
-         exception (new RuntimeException "test")]
+         exception (new RuntimeException "test123")]
      (verify-form-equiv (try
                           (throw exception)
                           10
                           (catch Throwable ex
                        ex))))
    (let [;; work around unimplemented new
-         exception (new RuntimeException "test")]
-     (is (thrown-with-msg? RuntimeException #"test"
+         exception (new RuntimeException "test123")]
+     (is (thrown-with-msg? RuntimeException #"test123"
                            (cps (try
                                   (throw exception)
                                   (catch IllegalStateException ex
