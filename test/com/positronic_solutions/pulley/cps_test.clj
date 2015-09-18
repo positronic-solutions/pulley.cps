@@ -270,33 +270,27 @@ to ensure they are equivalent."
    (with-strict-cps
      (verify-form-equiv (try))
      (verify-form-equiv (try 10))
-     (let [;; work around unimplemented new
+     (let [;; Can't use 'new' inside with-strict-cps context
            exception (new IllegalStateException "test123")]
        (is (thrown-with-msg? IllegalStateException #"test123"
-                             (cps (try (throw exception)))))))
-   ;; TODO: Implement handler-case in a way that is compatible
-   ;;       with with-strict-cps
-   (let [;; work around unimplemented new
-         exception (new IllegalStateException "test123")]
-     (verify-form-equiv (try
-                          (throw exception)
-                          10
-                          (catch IllegalStateException ex
-                            ex))))
-   (let [;; work around unimplemented new
-         exception (new RuntimeException "test123")]
-     (verify-form-equiv (try
-                          (throw exception)
-                          10
-                          (catch Throwable ex
-                       ex))))
-   (let [;; work around unimplemented new
-         exception (new RuntimeException "test123")]
-     (is (thrown-with-msg? RuntimeException #"test123"
-                           (cps (try
-                                  (throw exception)
-                                  (catch IllegalStateException ex
-                                    20))))))
+                             (cps (try (throw exception)))))
+       (verify-form-equiv (try
+                            (throw exception)
+                            10
+                            (catch IllegalStateException ex
+                              ex)))
+       (verify-form-equiv (try
+                            (throw exception)
+                            10
+                            (catch Throwable ex
+                              ex))))
+     (let [;; Can't use 'new' inside with-strict-cps context
+           exception (new RuntimeException "test123")]
+       (is (thrown-with-msg? RuntimeException #"test123"
+                             (cps (try
+                                    (throw exception)
+                                    (catch IllegalStateException ex
+                                      20)))))))
    (verify-form-equiv (let [a (atom nil)]
                         (vector (try
                                   10
