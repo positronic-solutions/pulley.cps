@@ -1,0 +1,7 @@
+* Release 0.2 — Exception support
+  * Exception handling (ticket #4)
+  * Named fn's (ticket #10)
+  * CPS-overrides for macros (ticket #22)
+  * with-exception-handler can be used outside CPS (ticket #12)
+  * set! now works on dynamic, "thread-bound" vars (ticket #11)
+* Release 0.1 — initial release
