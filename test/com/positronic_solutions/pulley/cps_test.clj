@@ -629,3 +629,13 @@ to ensure they are equivalent."
                                   (+ x *foo*))]
                           (binding [*foo* 20]
                             (f *foo*)))))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; Bugfixes and Regressions ;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(deftest ticket-14
+  ;; Proper checking for dynamic vars
+  (verify-form-equiv "foo\n"
+                     (with-out-str (println "foo"))))

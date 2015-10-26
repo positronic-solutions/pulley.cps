@@ -399,7 +399,9 @@ not a form representing a function."
                                          " is not supported at this time")))))))))
 
 (defn dynamic? [resolved-var]
-  (:dynamic (meta resolved-var)))
+  (if (var? resolved-var)
+    (. resolved-var (isDynamic))
+    false))
 
 (defmacro cps-symbol [cont env name]
   (if-let [resolved (resolve &env name)]
