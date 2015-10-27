@@ -78,9 +78,6 @@
     [com.positronic-solutions/pulley.cps "0.2.0"]
   #+END_SRC
 
-  Note that you will first have to install =pulley.cps=
-  to your local Maven repository.
-
   Now you just need to =require= =pulley.cps=:
 
   #+BEGIN_SRC clojure
