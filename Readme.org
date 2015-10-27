@@ -75,7 +75,7 @@
   simply include the following dependency in your =project.clj=:
 
   #+BEGIN_SRC clojure
-    [com.positronic-solutions/pulley.cps "0.2.0"]
+    [com.positronic-solutions/pulley.cps "0.2.1"]
   #+END_SRC
 
   Now you just need to =require= =pulley.cps=:
