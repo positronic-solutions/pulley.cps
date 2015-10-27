@@ -1,3 +1,5 @@
+* Release 0.2.1
+  * Fixes for tickets #14 and #15
 * Release 0.2 — Exception support
   * Exception handling (ticket #4)
   * Named fn's (ticket #10)
