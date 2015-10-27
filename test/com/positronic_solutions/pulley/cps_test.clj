@@ -639,3 +639,24 @@ to ensure they are equivalent."
   ;; Proper checking for dynamic vars
   (verify-form-equiv "foo\n"
                      (with-out-str (println "foo"))))
+
+(deftest ticket-15
+  ;; References to vars def'd in the same block don't work properly
+  (testing "Def without value"
+    (is (= (cps (def x)
+                x)
+           x)))
+  (testing "Def with value"
+    (is (= (cps (defn f [x] x)
+                (defn g [x] (f x))
+                (g 1))
+           1)))
+  (testing "Def with value and docstring"
+    (is (= (cps (def y "Docstring for y" 10)
+                y))
+        10))
+  (testing "Make sure dynamic vars work"
+    (is (= (cps (def ^:dynamic z 1)
+                (binding [z 11]
+                  z))
+           11))))

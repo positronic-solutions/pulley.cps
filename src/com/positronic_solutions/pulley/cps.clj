@@ -525,19 +525,22 @@ Parameters:
 
 (defmacro cps-def
   ([cont env name]
-     `(~cont (def ~name)))
+    `(do (declare ~name)
+         (~cont (def ~name))))
   ([cont env name expr]
      (let [value (gensym "value_")]
-       `(cps-expr (fn [~value]
-                    (~cont (def ~name ~value)))
-                  ~env
-                  ~expr)))
+       `(do (declare ~name)
+            (cps-expr (fn [~value]
+                        (~cont (def ~name ~value)))
+                      ~env
+                      ~expr))))
   ([cont env name doc expr]
      (let [value (gensym "value_")]
-       `(cps-expr (fn [~value]
-                    (~cont (def ~name ~doc ~value)))
-                  ~env
-                  ~expr))))
+       `(do (declare ~name)
+            (cps-expr (fn [~value]
+                        (~cont (def ~name ~doc ~value)))
+                      ~env
+                      ~expr)))))
 
 (defmacro cps-dot
   ([cont env & body]
