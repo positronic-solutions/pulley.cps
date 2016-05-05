@@ -673,3 +673,12 @@ to ensure they are equivalent."
   (testing "Destructuring with 'rest' and empty collections"
     (verify-form-equiv (let [[a & b] [:foo [] {} () #{}]]
                          [a b]))))
+
+(deftest ticket-17
+  ;; (fn* [] ...) fails
+  (testing "(fn* [] :foo)"
+    (verify-form-equiv :foo
+                       ((fn* [] :foo))))
+  (testing "(delay :foo)"
+    (verify-form-equiv :foo
+                       @(delay :foo))))
