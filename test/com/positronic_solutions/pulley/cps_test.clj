@@ -635,7 +635,7 @@ to ensure they are equivalent."
 ;;;; Bugfixes and Regressions ;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(deftest ticket-14
+#_(deftest ticket-14
   ;; Proper checking for dynamic vars
   (verify-form-equiv "foo\n"
                      (with-out-str (println "foo"))))
@@ -660,3 +660,16 @@ to ensure they are equivalent."
                 (binding [z 11]
                   z))
            11))))
+
+(deftest ticket-16
+  ;; Empty collection literals short-circuit continuation
+  (testing "Function application with empty collections"
+    (verify-form-equiv (list [] {} () #{})))
+  (testing "Collection of empty collections"
+    (verify-form-equiv [[] {} () #{}]))
+  (testing "Destructuring with empty collection"
+    (verify-form-equiv (let [[a b] [:foo {}]]
+                         [a b])))
+  (testing "Destructuring with 'rest' and empty collections"
+    (verify-form-equiv (let [[a & b] [:foo [] {} () #{}]]
+                         [a b]))))

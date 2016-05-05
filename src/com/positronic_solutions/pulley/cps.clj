@@ -389,7 +389,7 @@ not a form representing a function."
                       (if-let [empty-coll (empty coll)]
                         (if (empty? vars)
                           ;; then (we're done)
-                          empty-coll
+                          `(~cont ~empty-coll)
                           ;; else (conj the vars)
                           `(~cont (conj ~empty-coll
                                         ~@vars)))
@@ -445,7 +445,7 @@ Parameters:
   args - the forms of the function arguments"
   ([cont env]
      ;; handle empty list
-     '())
+     `(~cont ()))
   ([cont env f & args]
      (let [value (gensym "value_")]
        `(cps-expr (fn [~value]
