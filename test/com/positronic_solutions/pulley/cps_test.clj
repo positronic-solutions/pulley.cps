@@ -679,6 +679,16 @@ to ensure they are equivalent."
   (testing "(fn* [] :foo)"
     (verify-form-equiv :foo
                        ((fn* [] :foo))))
+  (testing "(fn* foo [] :foo"
+    (verify-form-equiv :foo
+                       ((fn* foo [] :foo))))
+  (testing "recursive (fn* foo [x] ...)"
+    (verify-form-equiv 0
+                       ((fn* foo [x]
+                          (if (> x 0)
+                            (foo (dec x))
+                            x))
+                        10)))
   (testing "(delay :foo)"
     (verify-form-equiv :foo
                        @(delay :foo))))

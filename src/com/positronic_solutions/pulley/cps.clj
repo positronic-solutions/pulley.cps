@@ -586,51 +586,53 @@ Parameters:
 
 If cont is not nil, it will be called with the resulting function.
 Otherwise, the resulting form will evaluate direcly to the function."
-  ([cont env & bodies]
-    (if (vector? (first bodies))
-      ;; then (normalize (fn* [.] ...) form to (fn* ([.] ...)) form
-      `(cps-fn* ~cont ~env (~@bodies))
-      ;; else (transform)
-      (let [return (gensym)
-            env (gensym "env_")
-            [name bodies] (if (symbol? (first bodies)) ;; Capture name (if given)
-                            [(first bodies) (rest bodies)]
-                            [nil bodies])
-            name' (when name ;; Generate alias for low-level function
-                    (gensym (str name "_")))
-            ;; f = constructed function
-            f `(fn->callable (fn ~@(when name ;; Named? -> inject alias
-                                     [name'])
-                               ~@(for [spec bodies]
-                                   ;; This should never be true,
-                                   ;; since we filter out symbols
-                                   ;; in the :when clause,
-                                   ;; but I'm keeping it around
-                                   ;; because ideally, we want
-                                   ;; to keep meaningful function names.
-                                   ;; Maybe we should convert symbols
-                                   ;; to (gensym (name spec))?
-                                   (if (symbol? spec)
-                                     spec
-                                     (let [[params & body] spec]
-                                       #_(println "fn: " params body)
-                                       `(~(into []
-                                                (concat [return env]
-                                                        params))
-                                         ~(cond-> `(cps-do ~return ~env
-                                                           ~@body)
-                                            name ((fn [body]
-                                                    (let [cont (gensym "cont_")
-                                                          env (gensym "env_")
-                                                          args (gensym "args_")]
-                                                      `(let [~name (fn->callable (fn [~cont ~env & ~args]
-                                                                                   (apply ~name' ~cont ~env ~args)))]
-                                                         ~body)))))))))))]
-        (if cont
-          ;; then (continuation provided -> pass f to continuation)
-          `(~cont ~f)
-          ;; else (continuation not provided -> return f directly)
-          f)))))
+  ([cont env name & bodies]
+    (letfn [(transform-fn [name bodies]
+              (let [return (gensym)
+                    env (gensym "env_")
+                    name' (when name ;; Generate alias for low-level function
+                            (gensym (str name "_")))
+                    ;; f = constructed function
+                    f `(fn->callable (fn ~@(when name ;; Named? -> inject alias
+                                             [name'])
+                                       ~@(for [spec bodies]
+                                           ;; This should never be true,
+                                           ;; since we filter out symbols
+                                           ;; in the :when clause,
+                                           ;; but I'm keeping it around
+                                           ;; because ideally, we want
+                                           ;; to keep meaningful function names.
+                                           ;; Maybe we should convert symbols
+                                           ;; to (gensym (name spec))?
+                                           (if (symbol? spec)
+                                             spec
+                                             (let [[params & body] spec]
+                                               #_(println "fn: " params body)
+                                               `(~(into []
+                                                        (concat [return env]
+                                                                params))
+                                                 ~(cond-> `(cps-do ~return ~env
+                                                                   ~@body)
+                                                    name ((fn [body]
+                                                            (let [cont (gensym "cont_")
+                                                                  env (gensym "env_")
+                                                                  args (gensym "args_")]
+                                                              `(let [~name (fn->callable (fn [~cont ~env & ~args]
+                                                                                           (apply ~name' ~cont ~env ~args)))]
+                                                                 ~body)))))))))))]
+                (if cont
+                  ;; then (continuation provided -> pass f to continuation)
+                  `(~cont ~f)
+                  ;; else (continuation not provided -> return f directly)
+                  f)))]
+      (cond
+        ;; if no name, use nil
+        (not (or (symbol? name)
+                 (nil? name))) `(cps-fn* ~cont ~env nil ~name ~@bodies)
+        ;; normalize (fn* [.] ...) form to (fn* ([.] ...)) form
+        (vector? (first bodies)) `(cps-fn* ~cont ~env ~name (~@bodies))
+        ;; normal form => transform
+        :else (transform-fn name bodies)))))
 
 (defmacro cps-if
   ([cont env test then]
