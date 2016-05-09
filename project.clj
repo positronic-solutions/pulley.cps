@@ -15,7 +15,7 @@
 ;; You should have received a copy of the GNU Lesser General Public License
 ;; along with pulley.cps.  If not, see <http://www.gnu.org/licenses/>.
 
-(defproject com.positronic-solutions/pulley.cps "0.2.2"
+(defproject com.positronic-solutions/pulley.cps "0.2.3-SNAPSHOT"
   :description "A macro-based CPS transformation compiler and runtime library"
   :url "https://github.com/positronic-solutions/pulley.cps"
   :license {:name "GNU Lesser General Public License, version 3 or later"
