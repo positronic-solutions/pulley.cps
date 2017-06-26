@@ -78,10 +78,10 @@
     [com.positronic-solutions/pulley.cps "0.2.2"]
   #+END_SRC
 
-  Now you just need to =require= =pulley.cps=:
+  Now you just need to =require= =com.positronic-solutions.pulley.cps=:
 
   #+BEGIN_SRC clojure
-    (require '[pulley.cps :as cps])
+    (require '[com.positronic-solutions.pulley.cps :as cps])
   #+END_SRC
 ** Basic Usage — Invoking the Compiler / Transforming Forms
    The compiler is invoked via two macros:
